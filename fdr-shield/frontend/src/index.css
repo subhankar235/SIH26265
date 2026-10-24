@@ -1,0 +1,5 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base{body{@apply bg-slate-50 text-slate-900 antialiased}button:disabled{@apply cursor-not-allowed opacity-60}button,input,select,a{@apply transition-colors duration-150}.dark body{@apply bg-zinc-950 text-zinc-100}.dark header,.dark aside,.dark main .bg-white{@apply border-zinc-800 bg-zinc-900 text-zinc-100}}
+.badge-green{@apply inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-800}.badge-yellow{@apply inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800}.badge-red{@apply inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-800}

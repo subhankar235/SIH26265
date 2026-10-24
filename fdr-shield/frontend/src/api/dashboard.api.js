@@ -1,0 +1,1 @@
+import{client}from'./client';export const getBureauDashboard=()=>client.get('/dashboard/bureau').then(r=>r.data);export const getInstitutionDashboard=()=>client.get('/dashboard/institution').then(r=>r.data);

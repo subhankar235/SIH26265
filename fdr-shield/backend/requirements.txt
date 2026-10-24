@@ -1,0 +1,24 @@
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+pydantic==2.*
+pydantic-settings==2.*
+sqlalchemy[asyncio]==2.0.*
+asyncpg
+aiosqlite
+alembic
+psycopg2-binary
+python-jose[cryptography]
+passlib[bcrypt]
+pyotp
+python-multipart
+celery[redis]==5.4.*
+redis
+boto3                # works with MinIO (S3 compatible)
+httpx
+pdf2image
+Pillow
+aiosmtplib           # free SMTP (Mailhog in dev, Gmail SMTP in prod)
+python-telegram-bot  # free alert channel (WhatsApp replacement)
+rapidfuzz            # fuzzy name matching for fraud checks
+pytest
+pytest-asyncio

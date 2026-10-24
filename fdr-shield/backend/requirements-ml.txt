@@ -1,0 +1,3 @@
+# Optional offline OCR engines. Do not install these for the default demo image.
+easyocr
+pytesseract
