@@ -1,20 +1,25 @@
 """Manual triggers & results for OCR / bank verification (USP 1 & 3)."""
 
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, Header
 from app.core.database import get_session
 from app.core.deps import get_current_user, require_roles
 from app.core.deps import pagination, Pagination
 from app.services import verification_service
+from app.services.fdr_service import get_fdr
+from app.services.workflow_state_service import start_new_execution
 
 router = APIRouter()
 
 
 @router.post("/{fdr_id}/run")
-async def run_verification(fdr_id: int, background_tasks: BackgroundTasks, session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
-    # Re-enqueue verification task
-    from app.workers.tasks_verification import run_verification_pipeline
-    background_tasks.add_task(run_verification_pipeline.delay,fdr_id)
-    return {'queued':True}
+async def run_verification(fdr_id: int, reason: str = Query('AICTE Official requested a verification reprocess.', min_length=4, max_length=1000),
+                           idempotency_key: str = Header(...,alias='Idempotency-Key',min_length=8,max_length=255),
+                           session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
+    # Reprocessing starts a new durable execution version and preserves prior node history.
+    fdr = await get_fdr(session, fdr_id)
+    instance = await start_new_execution(session, fdr, user.id, reason, idempotency_key)
+    return {'queued':True,'workflow_id':instance.id,'execution_version':instance.execution_version,
+            'execution_state':instance.execution_state}
 
 
 @router.get("/{fdr_id}/report")

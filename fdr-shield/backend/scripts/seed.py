@@ -25,6 +25,9 @@ NAMES = [
 ]
 
 async def seed():
+    from app.core.config import get_settings
+    if get_settings().app_env.lower() not in {'dev', 'development', 'test'}:
+        raise RuntimeError('Demo seed data is disabled outside development/test environments.')
     await init_db()
     bank_rows = {
         'sbi': [

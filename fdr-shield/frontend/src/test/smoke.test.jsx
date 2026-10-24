@@ -14,9 +14,9 @@ vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn() } }));
 
 describe('FDR-Shield UI smoke tests', () => {
   it('guards a route for the configured role', () => {
-    useAuthStore.getState().setSession('jwt', { role: 'institution' });
-    render(<MemoryRouter initialEntries={['/bureau']}><Routes><Route path="/bureau" element={<RoleGuard roles={['aicte_official']}><p>Bureau private</p></RoleGuard>}/><Route path="/institution" element={<p>Institution home</p>}/></Routes></MemoryRouter>);
-    expect(screen.getByText('Institution home')).toBeInTheDocument();
+    useAuthStore.getState().setUser({ role: 'aicte_official' });
+    render(<MemoryRouter initialEntries={['/official']}><Routes><Route path="/official" element={<RoleGuard roles={['aicte_official']}><p>Official private</p></RoleGuard>}/></Routes></MemoryRouter>);
+    expect(screen.getByText('Official private')).toBeInTheDocument();
   });
 
   it('shows a semantic trust badge', () => {
@@ -41,14 +41,14 @@ describe('FDR-Shield UI smoke tests', () => {
 
   it('renders declared, OCR and bank comparison and marks a mismatch', () => {
     render(<SplitViewer fdr={{fdr_number:'FDR-12',declared_data:{amount:100}}} report={{ocr:{amount:100},bank:{found:true,amount:90},discrepancies:[{field:'amount'}]}}/>);
-    expect(screen.getByText('Declared · OCR · Bank')).toBeInTheDocument();
+    expect(screen.getByText(/Mock bank match; demo only/)).toBeInTheDocument();
+    expect(screen.getByText(/do not independently certify that an FDR is genuine/i)).toBeInTheDocument();
     expect(screen.getByRole('row', { name: /Amount/ })).toHaveClass('bg-red-50');
   });
 
   it('logs in and routes an institution to its portal', async () => {
-    client.post.mockResolvedValue({data:{access_token:'jwt',mfa_required:false}});
-    client.get.mockResolvedValue({data:{id:1,email:'school@example.test',role:'institution',institution_id:1}});
-    render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<Login/>}/><Route path="/institution" element={<p>Institution portal ready</p>}/></Routes></MemoryRouter>);
+    client.post.mockResolvedValue({data:{mfa_required:false,user:{id:1,email:'school@example.test',role:'institution',institution_id:1}}});
+    render(<MemoryRouter initialEntries={['/institution/login']}><Routes><Route path="/institution/login" element={<Login/>}/><Route path="/institution" element={<p>Institution portal ready</p>}/></Routes></MemoryRouter>);
     fireEvent.change(screen.getByLabelText('Email address'), {target:{value:'school@example.test'}});
     fireEvent.change(screen.getByLabelText('Password'), {target:{value:'DemoPass123!'}});
     fireEvent.click(screen.getByRole('button', {name:'Continue securely'}));

@@ -1,0 +1,18 @@
+import { useQuery } from '@tanstack/react-query';
+import { client } from '../../api/client';
+
+export default function AdminDeliveryMonitor() {
+  const deliveries=useQuery({queryKey:['admin-deliveries'],queryFn:()=>client.get('/admin/notification-deliveries').then(r=>r.data)});
+  const outbox=useQuery({queryKey:['admin-outbox-dead'],queryFn:()=>client.get('/admin/outbox',{params:{status:'dead'}}).then(r=>r.data)});
+  const health=useQuery({queryKey:['admin-workflow-health'],queryFn:()=>client.get('/admin/workflow-health').then(r=>r.data)});
+  const failed=useQuery({queryKey:['admin-workflow-failures'],queryFn:()=>client.get('/admin/workflow-failures').then(r=>r.data)});
+  return <section><p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">Admin operations</p><h1 className="mb-6 mt-1 text-3xl font-bold">Delivery and outbox monitor</h1>
+    {health.data&&<div className="mb-6 grid gap-3 sm:grid-cols-3">{[['Workflow states',JSON.stringify(health.data.workflow_counts)],['Outbox pending',health.data.outbox_pending_or_processing],['Outbox dead',health.data.outbox_dead]].map(([label,value])=><article className="rounded-xl border bg-white p-4" key={label}><p className="text-xs uppercase text-slate-500">{label}</p><p className="mt-2 break-all font-semibold">{value}</p></article>)}</div>}
+    <h2 className="mb-3 text-xl font-semibold">Notification attempts</h2>
+    {deliveries.isLoading?<p>Loading delivery records…</p>:deliveries.isError?<p role="alert" className="text-red-700">Could not load notification attempts.</p>:!deliveries.data.length?<p className="mb-8 rounded-xl border bg-white p-6 text-slate-600">No delivery attempts recorded yet.</p>:<div className="mb-8 overflow-x-auto rounded-xl border bg-white"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-50"><tr>{['FDR','Channel','Recipient','Status','Attempt','Template','Error'].map(x=><th className="p-3" key={x}>{x}</th>)}</tr></thead><tbody>{deliveries.data.map(row=><tr key={row.attempt_id} className="border-t"><td className="p-3">{row.fdr_id ?? '—'}</td><td className="p-3">{row.channel}</td><td className="p-3">{row.recipient ?? '—'}</td><td className="p-3">{row.status}</td><td className="p-3">{row.attempt_no}</td><td className="p-3">{row.template_version ?? '—'}</td><td className="max-w-64 p-3 text-red-700">{row.error ?? '—'}</td></tr>)}</tbody></table></div>}
+    <h2 className="mb-3 text-xl font-semibold">Dead-lettered outbox work</h2>
+    {outbox.isLoading?<p>Loading failed jobs…</p>:outbox.isError?<p role="alert" className="text-red-700">Could not load outbox records.</p>:!outbox.data.length?<p className="rounded-xl border bg-white p-6 text-slate-600">No dead-lettered jobs.</p>:<div className="space-y-3">{outbox.data.map(row=><article key={row.id} className="rounded-xl border border-red-200 bg-white p-4"><div className="flex flex-wrap justify-between gap-2"><strong>{row.event_type} · {row.aggregate_id}</strong><span>Attempts: {row.attempts}</span></div><p className="mt-2 text-sm text-red-800">{row.last_error}</p></article>)}</div>}
+    <h2 className="mb-3 mt-8 text-xl font-semibold">Failed workflow nodes</h2>
+    {failed.isLoading?<p>Loading workflow failures…</p>:failed.isError?<p role="alert" className="text-red-700">Could not load worker failures.</p>:!failed.data.length?<p className="rounded-xl border bg-white p-6 text-slate-600">No blocked workflow nodes.</p>:<div className="space-y-3">{failed.data.map(row=><article key={row.node_execution_id} className="rounded-xl border border-red-200 bg-white p-4"><strong>FDR #{row.fdr_id} · {row.node_key} · {row.error_code}</strong><p className="mt-2 text-sm text-red-800">{row.error_message}</p></article>)}</div>}
+  </section>;
+}

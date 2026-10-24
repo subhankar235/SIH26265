@@ -26,4 +26,4 @@ async def list_refunds(status: str | None = None, page: Pagination = Depends(pag
 @router.post("/{refund_id}/decision")
 async def decide_refund(refund_id: int, body: RefundDecision, session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
     # Approve/reject; on approve set FDR RELEASED; audit
-    return await refund_service.decide(session,refund_id,body.decision,body.remarks,user.id)
+    return await refund_service.decide(session,refund_id,body.decision,body.remarks,user.id,body.idempotency_key)

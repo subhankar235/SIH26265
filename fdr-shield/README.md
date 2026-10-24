@@ -10,12 +10,19 @@ Requirements: Docker Engine with the Compose plugin.
 docker compose up --build -d
 docker compose exec backend alembic upgrade head
 docker compose exec backend python -m scripts.seed
+docker compose exec backend python -m scripts.backfill_workflows
 docker compose exec backend python -m scripts.demo_flow
 ```
 
-Open the frontend at http://localhost:5173, API docs at http://localhost:8000/docs, MinIO console at http://localhost:9001, Mailhog at http://localhost:8025, and the mock bank docs at http://localhost:9100/docs.
+Open the frontend at http://localhost:5173, API docs at http://localhost:8000/docs, MinIO console at http://localhost:9001, Mailhog at http://localhost:8025, and the mock bank docs at http://localhost:9100/docs. The development seed includes demo accounts; production bootstrapping must use the one-time Admin CLI and account invitations.
 
-The checked-in `backend/.env.example` contains local-only compose values. Set a unique `JWT_SECRET` and real SMTP/Telegram settings only when deploying outside the demo. OCR defaults to `OCR_ENGINE=ollama_vision`, `OLLAMA_BASE_URL=http://host.docker.internal:11434`, `OLLAMA_MODEL=gemma4:cloud`, and a 120-second timeout. The configured tag was present in the development machine's `ollama list`; Ollama's model registry lists `gemma4:cloud` with text and image input.
+The checked-in `backend/.env.example` contains development-only compose values. Demo seeding is blocked outside dev/test. For a non-demo database, migrate first, configure unique secrets, then run `python -m scripts.create_admin` once with `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`; remove that password from the environment afterward. Production requires `APP_ENV=prod`, `COOKIE_SECURE=true`, a valid `MFA_ENCRYPTION_KEY`, `FRONTEND_ORIGIN`, and matching `CORS_ORIGINS` behind HTTPS. The bootstrap Admin must change the initial password.
+
+After migrating an existing database, run the idempotent `backfill_workflows` script before relying on the new status projections. It imports a current-state snapshot only; legacy node-level run history cannot be reconstructed. New FDR submissions now enter a PostgreSQL-backed workflow via a transactional outbox; Celery executes persisted extraction, validation and routing nodes, records checkpoints/errors, retries transient failures, waits for corrections/official review, and reclaims expired worker leases. Reminder/correction email delivery also uses the outbox; ambiguous SMTP sends after a dispatcher crash are marked uncertain/dead rather than blindly resent. Workflow inspection/replay APIs and debugger UI, a command center and agents remain future work.
+
+Authentication uses separate portals at `/institution/login`, `/official/login`, and `/admin/login`. Access and rotating refresh tokens are HttpOnly cookies; browser state stores only the user profile. Unsafe cookie-authenticated calls use a signed double-submit CSRF token. Institution users can self-register, verify email, and then wait for Admin approval. Admin-created users receive a one-time invite to set a password. In local Compose, invitation, verification and reset emails can be inspected in Mailhog.
+
+The Official portal now includes a persisted workflow control room, exception inbox, SSE progress, and a natural-language Command Center. Until an LLM provider/key is configured, command interpretation is an offline, typed deterministic allowlist; unknown or financial-approval commands are refused. Commands resolve case references on the server, show a plan, require confirmation for mutations, and execute through Celery. No release/refund approval is available as an agent command.
 
 ### Ollama vision modes
 
@@ -26,7 +33,7 @@ Set `OCR_ENGINE=easyocr` only after installing `backend/requirements-ml.txt`; ch
 
 ## Demo accounts
 
-`python -m scripts.seed` creates the following demo users. Password for each is `DemoPass123!`.
+`python -m scripts.seed` creates the following development-only demo users. Password for each is `DemoPass123!`.
 
 | Role | Email |
 |---|---|

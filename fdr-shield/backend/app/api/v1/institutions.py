@@ -20,8 +20,8 @@ async def list_institutions(q: str | None = None, state: str | None = None, page
 
 @router.post("")
 async def create_institution(body: InstitutionCreate, session=Depends(get_session), user=Depends(require_roles('admin'))):
-    # Create institution + default institution user
-    return await institution_service.create_institution(session,body)
+    # Create institution and invite its initial account holder.
+    return await institution_service.create_institution(session,body,user)
 
 
 @router.get("/{institution_id}")

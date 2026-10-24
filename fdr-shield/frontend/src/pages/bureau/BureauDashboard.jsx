@@ -25,7 +25,7 @@ export default function BureauDashboard() {
         <div className="h-80 rounded-xl border bg-white p-5"><h2 className="font-semibold">Value by bank</h2><ResponsiveContainer width="100%" height="90%"><BarChart data={data.value_by_bank || []}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="label" /><YAxis /><Tooltip formatter={value => formatINR(value)} /><Bar dataKey="value" fill="#0891b2" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div>
       </div>
       <div className="mt-6"><h2 className="mb-3 font-semibold">Maturities by month</h2><MaturityTimeline data={data.maturity_timeline || []} /></div>
-      <div className="mt-6"><TrustMatrixTable rows={rows} filters={filters} onFilterChange={setFilters} onRowClick={row => navigate(`/bureau/scrutiny/${row.id}`)} /></div>
+      <div className="mt-6"><TrustMatrixTable rows={rows} filters={filters} onFilterChange={setFilters} onRowClick={row => navigate(`/official/scrutiny/${row.id}`)} /></div>
     </>}
   </section>;
 }
