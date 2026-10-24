@@ -13,10 +13,10 @@ from pathlib import Path
 
 
 @pytest.mark.parametrize('role,allowed', [
-    ('institution', False), ('scrutiny_officer', False), ('bureau_chief', True), ('admin', True),
+    ('institution', False), ('aicte_official', True), ('admin', True),
 ])
-def test_chief_only_role_guard(role, allowed):
-    check = require_roles('bureau_chief', 'admin')
+def test_official_and_admin_role_guard(role, allowed):
+    check = require_roles('aicte_official', 'admin')
     async def run():
         if allowed:
             assert (await check(user=SimpleNamespace(role=role))).role == role

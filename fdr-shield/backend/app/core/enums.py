@@ -5,8 +5,7 @@ from enum import Enum
 
 class Role(str, Enum):
     INSTITUTION = 'institution'
-    SCRUTINY_OFFICER = 'scrutiny_officer'
-    BUREAU_CHIEF = 'bureau_chief'
+    AICTE_OFFICIAL = 'aicte_official'
     ADMIN = 'admin'
 
 

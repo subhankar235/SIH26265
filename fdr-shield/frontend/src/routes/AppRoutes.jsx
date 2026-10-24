@@ -36,13 +36,13 @@ export default function AppRoutes() {
         <Route
           path="/bureau/*"
           element={
-            <RoleGuard roles={["scrutiny_officer", "bureau_chief", "admin"]}>
+            <RoleGuard roles={["aicte_official", "admin"]}>
               <Routes>
                 <Route index element={<BD />} />
                 <Route path="scrutiny" element={<Queue />} />
                 <Route path="scrutiny/:id" element={<Split />} />
                 <Route path="discrepancies" element={<Disc />} />
-                <Route path="refunds" element={<RoleGuard roles={["bureau_chief", "admin"]}><BureauRefunds /></RoleGuard>} />
+                <Route path="refunds" element={<RoleGuard roles={["aicte_official", "admin"]}><BureauRefunds /></RoleGuard>} />
                 <Route path="institutions" element={<Inst />} />
                 <Route path="audit" element={<Audit />} />
               </Routes>

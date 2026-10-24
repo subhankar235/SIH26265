@@ -32,8 +32,7 @@ Set `OCR_ENGINE=easyocr` only after installing `backend/requirements-ml.txt`; ch
 |---|---|
 | Institution 1 | `institution1@example.test` |
 | Institution 2–5 | `institution2@example.test` through `institution5@example.test` |
-| Scrutiny officer | `officer@example.test` |
-| Bureau chief | `chief@example.test` |
+| AICTE Official | `officer@example.test` or `chief@example.test` |
 | Admin | `admin@example.test` |
 
 ## Four-step demo
@@ -41,7 +40,7 @@ Set `OCR_ENGINE=easyocr` only after installing `backend/requirements-ml.txt`; ch
 1. Sign in with `institution1@example.test` and upload a scan. Seed creates 15 sample records and three scans in `backend/sample_scans` (matching SBI/PNB, plus a deliberately mismatched HDFC sample).
 2. Watch the verification report: OCR is compared against the declaration and the mock bank; trust badges settle to green, amber, or red. This uses `gemma4:cloud` through the configured Ollama endpoint.
 3. Sign in as `officer@example.test`, inspect the SplitViewer and approve/reject; use `admin@example.test` to fire `POST /api/v1/notifications/test?fdr_id=<id>&stage=T-90` and check Mailhog at http://localhost:8025.
-4. Use a matured, verified FDR to request a refund, then sign in as `chief@example.test` to approve/reject. Audit entries are visible in the Bureau portal.
+4. Use a matured, verified FDR to request a refund, then sign in as either AICTE Official account to approve/reject. Audit entries are visible in the Bureau portal.
 
 ## No-Docker Windows demo
 

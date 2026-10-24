@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("")
-async def list_institutions(q: str | None = None, state: str | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief','admin'))):
+async def list_institutions(q: str | None = None, state: str | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
     # Paginated search; include fdr_count and total_value
     return await institution_service.search_institutions(session,q,state,page)
 

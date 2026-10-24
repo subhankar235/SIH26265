@@ -44,7 +44,7 @@ async def get_fdr(fdr_id: int, session=Depends(get_session), user=Depends(get_cu
 
 
 @router.patch("/{fdr_id}/status")
-async def update_status(fdr_id: int, body: FDRStatusUpdate, session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief'))):
+async def update_status(fdr_id: int, body: FDRStatusUpdate, session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
     # Validate transition via fdr_service.transition; write audit
     return await fdr_service.transition(session,fdr_id,body.status,user.id,body.remarks)
 

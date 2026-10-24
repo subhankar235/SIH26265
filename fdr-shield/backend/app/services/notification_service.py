@@ -43,7 +43,7 @@ async def escalate_to_bureau(session: AsyncSession, fdr: FDR) -> None:
     fdr.status=FDRStatus.EXPIRED.value if fdr.maturity_date.isoformat() < datetime.now(timezone.utc).date().isoformat() else fdr.status
     if previous_status!=fdr.status:
         await record(session,None,'fdr',fdr.id,'expired','scheduler',{'status':[previous_status,fdr.status]})
-    chiefs=(await session.scalars(select(User).where(User.role=='bureau_chief',User.is_active.is_(True)))).all()
+    chiefs=(await session.scalars(select(User).where(User.role=='aicte_official',User.is_active.is_(True)))).all()
     if chiefs and not await session.scalar(select(Notification.id).where(
         Notification.fdr_id==fdr.id,Notification.stage==AlertStage.ESCALATED.value,Notification.channel=='email'
     )):

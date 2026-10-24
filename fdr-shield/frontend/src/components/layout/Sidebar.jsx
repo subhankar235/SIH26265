@@ -15,7 +15,7 @@ export default function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useUiStore();
   const institution = user?.role === 'institution';
   const root = institution ? '/institution' : '/bureau';
-  const links = institution ? institutionLinks : bureauLinks.filter(([, label]) => label !== 'Refund decisions' || ['bureau_chief', 'admin'].includes(user?.role));
+  const links = institution ? institutionLinks : bureauLinks;
   return <aside className={`shrink-0 border-r border-slate-200 bg-white transition-[width] duration-200 md:min-h-screen ${sidebarOpen ? 'md:w-64' : 'md:w-[76px]'}`}>
     <div className="flex h-16 items-center justify-between border-b px-4">
       <div className="flex items-center gap-2 overflow-hidden"> <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-navy-900 text-white"><Landmark size={19}/></span>{sidebarOpen&&<span className="whitespace-nowrap text-lg font-bold tracking-tight">FDR<span className="text-indigo-700">Shield</span></span>}</div>

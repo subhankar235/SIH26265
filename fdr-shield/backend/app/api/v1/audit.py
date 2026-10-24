@@ -11,6 +11,6 @@ router = APIRouter()
 
 
 @router.get("")
-async def list_audit_logs(entity: str | None = None, entity_id: int | None = None, user_id: int | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('bureau_chief','admin'))):
+async def list_audit_logs(entity: str | None = None, entity_id: int | None = None, user_id: int | None = None, page: Pagination = Depends(pagination), session: AsyncSession = Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
     # Paginated, filterable; NO write endpoints exist
     return await query_logs(session,{'entity':entity,'entity_id':entity_id,'user_id':user_id},page)

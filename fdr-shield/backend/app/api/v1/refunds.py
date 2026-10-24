@@ -17,13 +17,13 @@ async def create_refund(body: RefundCreate, session=Depends(get_session), user=D
 
 
 @router.get("")
-async def list_refunds(status: str | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('institution','bureau_chief','admin'))):
+async def list_refunds(status: str | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('institution','aicte_official','admin'))):
     # Institution: own; bureau: all
     scope=user.institution_id if user.role=='institution' else None
     return await refund_service.list_refunds(session,status,scope,page)
 
 
 @router.post("/{refund_id}/decision")
-async def decide_refund(refund_id: int, body: RefundDecision, session=Depends(get_session), user=Depends(require_roles('bureau_chief'))):
+async def decide_refund(refund_id: int, body: RefundDecision, session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
     # Approve/reject; on approve set FDR RELEASED; audit
     return await refund_service.decide(session,refund_id,body.decision,body.remarks,user.id)

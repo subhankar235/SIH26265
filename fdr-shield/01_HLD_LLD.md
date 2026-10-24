@@ -106,8 +106,7 @@ Allowed transitions live in one dict `ALLOWED_TRANSITIONS` in `fdr_service.py`.
 | Role | Can |
 |---|---|
 | `institution` | Submit/view own FDRs, renewal, refund claim |
-| `scrutiny_officer` | Queue, split view, status changes, resolve discrepancies |
-| `bureau_chief` | All officer rights + refund decisions + audit logs |
+| `aicte_official` | Queue, split view, status changes, discrepancy resolution, refund decisions, audit logs |
 | `admin` | Institutions CRUD, test alerts, everything read |
 
 ---

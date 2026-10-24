@@ -158,7 +158,7 @@ Prompt pattern: *"Implement `backend/app/services/fraud_service.py` per the comm
 One file per prompt; run `pytest` / `npm run dev` after each; keep contracts in section 4.2 unchanged unless you update both sides and these docs.
 
 ## 7. Definition of done (demo)
-- [x] Login for 3 roles (institution, officer, chief) — exercised institution, officer, chief and admin tokens in the live demo.
+- [x] Login for 3 roles (institution, AICTE official, admin).
 - [x] Upload scan -> OCR data + bank check + badge appear — live Ollama OCR confidence 0.833, mock bank found, green badge, no discrepancy.
 - [x] Seeded mismatch shows red badge + discrepancy list — seed creates red HDFC amount mismatches; 13 open seeded discrepancies were returned by the live API.
 - [x] Split viewer works; approve/reject updates status and audit log — SplitViewer smoke test passed; live officer approval generated six audit events.

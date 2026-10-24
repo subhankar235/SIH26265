@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.post("/{fdr_id}/run")
-async def run_verification(fdr_id: int, background_tasks: BackgroundTasks, session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief'))):
+async def run_verification(fdr_id: int, background_tasks: BackgroundTasks, session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
     # Re-enqueue verification task
     from app.workers.tasks_verification import run_verification_pipeline
     background_tasks.add_task(run_verification_pipeline.delay,fdr_id)
@@ -25,12 +25,12 @@ async def get_report(fdr_id: int, session=Depends(get_session), user=Depends(get
 
 
 @router.post("/discrepancies/{discrepancy_id}/resolve")
-async def resolve_discrepancy(discrepancy_id: int, remarks: str, session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief'))):
+async def resolve_discrepancy(discrepancy_id: int, remarks: str, session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
     # Mark resolved, recompute badge, audit
     return await verification_service.resolve_discrepancy(session,discrepancy_id,remarks,user.id,getattr(user,'email',''))
 
 
 @router.get("/discrepancies")
-async def list_discrepancies(resolved: bool = False, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief','admin'))):
+async def list_discrepancies(resolved: bool = False, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
     # Discrepancy Alert Board data
     return await verification_service.list_discrepancies(session,resolved,page)

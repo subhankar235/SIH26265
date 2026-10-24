@@ -15,7 +15,7 @@ vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn() } }));
 describe('FDR-Shield UI smoke tests', () => {
   it('guards a route for the configured role', () => {
     useAuthStore.getState().setSession('jwt', { role: 'institution' });
-    render(<MemoryRouter initialEntries={['/bureau']}><Routes><Route path="/bureau" element={<RoleGuard roles={['bureau_chief']}><p>Bureau private</p></RoleGuard>}/><Route path="/institution" element={<p>Institution home</p>}/></Routes></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/bureau']}><Routes><Route path="/bureau" element={<RoleGuard roles={['aicte_official']}><p>Bureau private</p></RoleGuard>}/><Route path="/institution" element={<p>Institution home</p>}/></Routes></MemoryRouter>);
     expect(screen.getByText('Institution home')).toBeInTheDocument();
   });
 
