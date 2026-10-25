@@ -29,6 +29,7 @@ class FDROut(BaseModel):
     execution_state: str | None = None
     authorization_state: str | None = None
     verification_level: str | None = None
+    is_synthetic: bool | None = None
     declared_data: dict
     ocr_data: dict | None = None
     bank_data: dict | None = None

@@ -1,16 +1,16 @@
 import { NavLink } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
-import { Landmark, LayoutDashboard, Upload, Files, Wallet, ShieldCheck, AlertTriangle, Building2, ScrollText, PanelLeftClose, PanelLeftOpen, GitBranch, MessageSquareText } from 'lucide-react';
+import { Landmark, LayoutDashboard, Upload, Files, Wallet, ShieldCheck, AlertTriangle, Building2, ScrollText, PanelLeftClose, PanelLeftOpen, GitBranch, MessageSquareText, Bell, Settings, Activity, ClipboardCheck, BrainCircuit } from 'lucide-react';
 
 const institutionLinks = [
-  ['', 'Overview', LayoutDashboard], ['/upload', 'Upload FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/refunds', 'Refund claims', Wallet],
+  ['', 'Overview', LayoutDashboard], ['/fdrs/new', 'Submit FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/renewals', 'Renewals', Activity], ['/releases', 'Releases', Wallet], ['/notifications', 'Notifications', Bell],
 ];
 const bureauLinks = [
-  ['', 'Overview', LayoutDashboard], ['/queue', 'Scrutiny queue', ShieldCheck], ['/discrepancies', 'Discrepancies', AlertTriangle], ['/refunds', 'Refund decisions', Wallet], ['/workflows', 'Workflow control room', GitBranch], ['/exceptions', 'Exception inbox', AlertTriangle], ['/command', 'Command Center', MessageSquareText], ['/institutions', 'Institutions', Building2], ['/audit', 'Audit logs', ScrollText],
+  ['', 'Overview', LayoutDashboard], ['/queue', 'Scrutiny queue', ShieldCheck], ['/discrepancies', 'Discrepancies', AlertTriangle], ['/approvals', 'Approvals', ClipboardCheck], ['/control-room', 'Control room', GitBranch], ['/exceptions', 'Exception inbox', AlertTriangle], ['/command', 'Command Center', MessageSquareText], ['/institutions', 'Institutions', Building2], ['/audit', 'Audit logs', ScrollText],
 ];
 const adminLinks = [
-  ['', 'Overview', LayoutDashboard], ['/users', 'User accounts', ShieldCheck], ['/registrations', 'Registrations', Building2], ['/institutions', 'Institutions', Building2], ['/notifications', 'Delivery monitor', AlertTriangle], ['/command', 'Operations commands', MessageSquareText], ['/audit', 'Audit logs', ScrollText],
+  ['', 'Overview', LayoutDashboard], ['/users', 'User accounts', ShieldCheck], ['/roles', 'Role assignments', Settings], ['/registrations', 'Registrations', Building2], ['/institutions', 'Institutions', Building2], ['/rules', 'Automation rules', Settings], ['/ml', 'ML governance', BrainCircuit], ['/alerts', 'Alerts', Bell], ['/jobs', 'Failed jobs', AlertTriangle], ['/health', 'System health', Activity], ['/ops-agent', 'Operations agent', MessageSquareText], ['/audit', 'Audit logs', ScrollText],
 ];
 
 export default function Sidebar() {

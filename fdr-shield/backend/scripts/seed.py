@@ -78,8 +78,10 @@ async def seed():
                         'issue_date': (today - timedelta(days=365)).isoformat(), 'maturity_date': maturity.isoformat(), 'holder': inst.name}
             if not fdr:
                 fdr = FDR(institution_id=inst.id, fdr_number=number, bank_name=bank.upper(), branch='Main Branch', amount=amount,
-                    issue_date=today-timedelta(days=365), maturity_date=maturity, status=status, trust_badge=badge, declared_data=declared)
+                    issue_date=today-timedelta(days=365), maturity_date=maturity, status=status, trust_badge=badge, declared_data=declared,
+                    is_synthetic=True)
                 session.add(fdr)
+            fdr.is_synthetic = True
             fdr.status=status; fdr.trust_badge=badge
             fdr.ocr_data={'fdr_number': number, 'bank_name': bank.upper(), 'holder_name': inst.name, 'amount': str(amount),
                 'issue_date': (today-timedelta(days=365)).isoformat(), 'maturity_date': maturity.isoformat(), 'confidence': 1.0}

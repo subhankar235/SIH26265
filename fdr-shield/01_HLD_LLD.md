@@ -121,14 +121,15 @@ Phase 1 adds orthogonal state dimensions while retaining `fdrs.status` as the le
 users(id PK, email UQ, password_hash?, role, institution_id FK?, account status, lockout, session version, encrypted MFA secret)
 institutions(id PK, aicte_id UQ, name, state, head_name, contact_email, contact_phone, telegram_chat_id?)
 fdrs(id PK, institution_id FK, fdr_number IDX, bank_name, branch, amount NUM(14,2),
-     issue_date, maturity_date IDX, status (legacy), lifecycle_state?, execution_state?, authorization_state?, verification_level?, trust_badge,
-     declared_data JSON, ocr_data JSON?, bank_data JSON?,
+      issue_date, maturity_date IDX, status (legacy), lifecycle_state?, execution_state?, authorization_state?, verification_level?, trust_badge,
+      declared_data JSON, ocr_data JSON?, bank_data JSON?, is_synthetic BOOLEAN NULL (NULL=legacy provenance unknown),
      last_alert_stage?, replaces_fdr_id FK?)
 documents(id PK, fdr_id FK, doc_type, s3_key, content_type, uploaded_by FK, version_no, sha256?, supersedes_document_id?)
 discrepancies(id PK, fdr_id FK, field, declared_value, extracted_value, source, severity, resolved)
 notifications(id PK, fdr_id FK, stage, channel, recipient, status, sent_at)  UQ(fdr_id, stage, channel)
 refund_requests(id PK, fdr_id FK, requested_by FK, status, reviewed_by?, remarks?)
 audit_logs(id PK, user_id?, entity, entity_id, action, ip_address, delta_changes JSON, created_at)
+         plus previous_hash / record_hash; audit_chain_heads is a locked singleton chain watermark
 verification_runs(id PK, fdr_id FK, document_id?, extraction_engine, source, verification_level,
                   declared_snapshot JSON, extracted_fields JSON?, bank_result JSON?, discrepancies JSON)
 workflow_instances(id PK, fdr_id FK, institution_id FK, workflow_version, execution_version,
@@ -144,6 +145,7 @@ correction_requests(id PK, workflow_instance_id FK, fdr_id FK, requested_by FK, 
 automation_rules / automation_rule_versions (versioned policy JSON)
 command_executions(id PK, user_id FK, raw_command, interpreted_plan JSON?, authorization_result JSON?, status)
 notification_delivery_attempts(id PK, notification_id FK, attempt_no, provider, status, provider_response?, error?)
+ml_model_versions / ml_demo_samples / ml_predictions / ml_operations_snapshots
 ```
 Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discrepancy / Notification / RefundRequest / WorkflowInstance; workflow instance 1-N node execution/event/checkpoint/approval/exception/correction; FDR self-reference via `replaces_fdr_id`.
 
@@ -152,7 +154,7 @@ Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discre
 |---|---|---|
 | POST `/auth/login/{institution|official|admin}`, `/auth/refresh`, `/auth/logout`; GET `/auth/me` | any / cookie session | Manual role-specific auth |
 | GET/POST `/institutions`, GET `/institutions/{id}`, `/institutions/{id}/fdrs` | AICTE Official / admin | Institution records |
-| POST `/fdrs` (multipart) | institution | Submit FDR |
+| POST `/fdrs/extract-preview` (multipart), POST `/fdrs` (multipart) | institution | Preview OCR, then submit only after every field is confirmed |
 | GET `/fdrs` (status, badge, institution_id) | all (scoped) | Trust Matrix |
 | GET `/fdrs/{id}`, `/fdrs/{id}/presigned-url` | all (scoped) | Detail / scan URL |
 | PATCH `/fdrs/{id}/status` | AICTE Official | Scrutiny decision |
@@ -164,6 +166,16 @@ Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discre
 | POST/GET `/refunds`, POST `/refunds/{id}/decision` | institution / AICTE Official | Release workflow |
 | GET `/dashboard/bureau`, `/dashboard/institution` | AICTE Official / admin; institution | Stats |
 | GET `/audit` | AICTE Official, admin | Audit trail |
+| POST `/institution/assistant/messages` | institution | Institution-scoped assistance; context is derived server-side |
+| GET `/admin/operations/health`, `/failed-jobs`, `/stuck-cases`, `/delivery-failures`, `/recovery-recommendations` | admin | Read-only deterministic operations monitoring |
+| POST `/admin/operations/actions/{requeue-failed-job|send-test-alert}` | admin | Confirmed, allowlisted operational actions only |
+| GET/POST `/admin/rules`, POST `/admin/rules/{id}/versions` | admin | Append-only automation policy versions with audit records |
+| GET `/institution/ml/recommendations` | institution | Own-case deterministic review suggestions only |
+| GET `/workflows/recommendations` | AICTE Official | Rule-based priority suggestions only |
+| GET `/admin/ml/gates`, POST `/admin/ml/gates/evaluate`, POST `/admin/ml/demo-data`, GET `/admin/ml/{registry,demo-samples,predictions}`, POST `/admin/ml/predictions/run` | admin | Gate 0, labeled synthetic demos, registry, advisory fallback inference |
+| GET `/admin/audit/verify-chain`, GET `/admin/audit/export` | admin | Verify/download the hash-chained audit trail |
+
+Institution upload previews OCR without persistence. The UI requires a per-field review confirmation; edits are marked `DECLARED`, untouched extracted values are marked `EXTRACTED`, and provenance plus confirmed field names are stored in `fdrs.declared_data` and audit logs. Current OCR confidence is document-level, so that score is shown on each populated field; missing fields are explicitly marked “Not found in document.”
 
 Mock bank (separate service, `:9000`): `GET /banks`, `POST /{sbi|pnb|hdfc}/v1/fdr/verify`, `GET /{bank}/v1/fdr/{no}/status`.
 
@@ -194,6 +206,23 @@ else                                      -> 🟡 SELF_DECLARED
 
 ### 2.4.1 Audit write
 Every service mutation calls `audit_service.record(session, user_id, entity, entity_id, action, ip, delta)` inside the same transaction as the change.
+
+### 2.4.2 Phase 13 ML gates and fallbacks
+- Gate plans, features, missing-value policies, acceptance criteria and minimum real-data volumes are declared in `backend/app/services/ml_service.py` before any trainer can exist. Current runtime intentionally has no trainer or ML library and does not train models.
+- `institution_dagmm` (`institution-fdr-v1`) counts only explicitly `is_synthetic=false` FDRs; target is unusual structured-pattern ranking, with a minimum of 1,000 complete clean records. Evaluation plan: blinded officer precision@k/calibration versus Isolation Forest and robust z-score. Fallback: deterministic review rules; UI wording is only “unusual pattern — review suggested.”
+- `official_deephit` (`official-resolution-v1`) defines resolution as workflow `completed_at`; unresolved records are right-censored at extraction cutoff. Minimum: 500 resolved, 100 censored and a 90-day chronological span. Evaluation plan: chronological C-index, time-dependent AUC and calibration versus Cox/rule priority. Fallback: rule-based deadline priority.
+- `admin_bocpd` (`admin-metrics-15m-v1`) needs at least 1,000 explicitly real metric snapshots spanning 30 days. Evaluation plan: false-positive rate/detection delay versus threshold rules. Development/test metric captures are synthetic and excluded. Fallback: deterministic operations thresholds.
+- Admin may create labeled synthetic demo features in `ml_demo_samples`; all are `is_synthetic=true`, excluded from gate counts/hashes and shown with a synthetic banner. Registry demo versions state `DEMO_ONLY_NOT_TRAINED`; no synthetic model metrics are reported.
+- “Eligible for training review” is not approval and never launches training. All current recommendations use deterministic fallbacks, are stored as advisory predictions, and never affect workflow state, trust, permissions, approvals, rejection, or release.
+- Registrations capture the fixed seed, feature version, dataset hash, runtime-library manifest, acceptance criteria and real/synthetic row counts. There is no trained DAGMM, DeepHit or BOCPD version until a separate trainer meets its stated acceptance criteria.
+
+### 2.4.3 Phase 14 reliability and security controls
+- Audit rows are SHA-256 chained over canonical record fields with a transaction-locked chain head. ORM guards and database UPDATE/DELETE triggers enforce append-only records; admin APIs verify and export the chain, and Celery writes a verified weekly export to configured private storage.
+- Request IDs are validated, propagated into same-request audit rows and included in structured HTTP logs. Request logs omit body, query parameters, cookies, authorization headers and prompts.
+- Expensive OCR preview, institution-assistant and command endpoints use Redis-backed per-identity rate limits, with a bounded per-process fallback when Redis is unavailable. Login/public-auth abuse also has existing database throttles.
+- Uploads keep size, MIME and magic-byte validation. If `CLAMAV_HOST` is configured, a ClamAV INSTREAM scan runs before OCR/storage and fails closed on scanner outage; unconfigured environments explicitly do not claim an AV scan.
+- Legacy rows with unrecorded origin have `is_synthetic=NULL` and are excluded from real-data gates. Seeded records and generated demo samples are explicitly synthetic.
+- Backup/restore and retention durations remain policy-owner decisions. No compliance or production-readiness claim is made without operational evidence.
 
 ### 2.5 Frontend design
 - Role-specific routes: `/institution/*`, `/official/*`, `/admin/*`; `/bureau/*` remains a compatibility route for existing links.

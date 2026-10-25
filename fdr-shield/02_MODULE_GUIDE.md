@@ -118,6 +118,20 @@ Celery tasks are sync entry points: wrap async service calls with `asyncio.run(.
 | `pages/bureau` / `pages/admin` | Official scrutiny pages and Admin account, registration and institution screens |
 | `routes/AppRoutes.jsx` | route table in the comment; wrap with `RoleGuard` |
 
+### Phase 12 role-based UI routes
+- Institution portal: `/institution`, `/institution/fdrs/new`, `/institution/fdrs`, `/institution/fdrs/:id`, `/institution/renewals`, `/institution/releases`, `/institution/notifications`; the assistant drawer is available across institution routes.
+- Official portal: `/official/queue`, `/official/review/:id`, `/official/control-room`, `/official/workflows/:id`, `/official/exceptions`, `/official/approvals`, `/official/command`, `/official/audit`.
+- Admin portal: `/admin/users`, `/admin/institutions`, `/admin/roles`, `/admin/dashboard`, `/admin/rules`, `/admin/alerts`, `/admin/jobs`, `/admin/health`, `/admin/audit`, `/admin/ops-agent`.
+- Shared UI states include retryable errors with request IDs, loading skeletons, guided empty states, accessible confirmation dialogs, status icons/text and success toasts. Workflow and exception views use SSE with polling fallback; data endpoints without an SSE feed poll on an interval. Institution notification read markers are browser-local because notification records do not have a user read-state column.
+
+### Phase 13 data-dependent ML and Phase 14 hardening
+- Run Gate 0 from the admin ML governance page/API before any trainer work. Real training rows require explicit `is_synthetic=false`; legacy `NULL` provenance is excluded. Synthetic samples are isolated in `ml_demo_samples`, always labeled, and cannot enter Gate 0 hashes or real metrics.
+- Gate plans specify target, feature version, missing policy, data minima, evaluation metrics, acceptance thresholds and deterministic fallback. No training dependency/model is currently shipped; gates only record blocked/eligible-for-review states. Eligibility does not enable authorization-affecting inference.
+- Deterministic inference stores only advisory `ml_predictions`; all rows include origin and predictor metadata. Periodic ops snapshots are labeled synthetic in dev/test; weekly audit export validates the SHA-256 chain before writing to private object storage.
+- `CLAMAV_HOST` enables pre-storage ClamAV INSTREAM scanning. If configured but unavailable, upload fails closed. Without it, normal MIME/magic/size checks remain and no AV scan is claimed.
+- Redis rate limits guard OCR preview, command and assistant endpoints; a bounded per-worker fallback applies on Redis failure. Request IDs are sanitized, carried into audit records and structured HTTP logs; do not add prompt/document contents to logs.
+- PostgreSQL backups can be created with `python scripts/postgres_backup.py backup <private-path.dump>` and restore-tested only against a separate disposable database using `RESTORE_DATABASE_URL=<disposable-url> python scripts/postgres_backup.py verify-restore <path>`. Credentials are read from the environment, not argv; the helper verifies SHA-256 and migration/audit/FDR counts, does not delete backups, and requires deployment-owned retention, encryption and offsite policy.
+
 ## 4. How modules communicate
 
 ### 4.1 Runtime call chains

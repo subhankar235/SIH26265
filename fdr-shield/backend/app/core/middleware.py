@@ -3,14 +3,25 @@
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.core.security import verify_csrf_token
+from app.core.request_context import request_id_context
+import logging
+import time
+
+logger=logging.getLogger('fdr_shield.http')
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        # Capture user_id, ip, method, path, status; push a lightweight request log.
-        # (State-change audit rows are written explicitly by services via audit_service.record)
-        response=await call_next(request)
-        return response
+        started=time.perf_counter();status_code=500
+        try:
+            response=await call_next(request)
+            status_code=response.status_code
+            return response
+        finally:
+            # Intentionally exclude query strings, bodies, cookies, headers, and user data.
+            logger.info('http_request',extra={'request_id':getattr(request.state,'request_id',None),
+                'method':request.method,'path':request.url.path,'status_code':status_code,
+                'duration_ms':round((time.perf_counter()-started)*1000,2)})
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
@@ -35,7 +46,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
 async def add_request_id(request, call_next):
     import uuid
-    request_id=request.headers.get('X-Request-ID') or str(uuid.uuid4())
+    supplied=request.headers.get('X-Request-ID','')
+    request_id=supplied if len(supplied)<=64 and supplied.isascii() and all(c.isalnum() or c in '-_.' for c in supplied) else str(uuid.uuid4())
     request.state.request_id=request_id
-    response=await call_next(request); response.headers['X-Request-ID']=request_id
-    return response
+    token=request_id_context.set(request_id)
+    try:
+        response=await call_next(request); response.headers['X-Request-ID']=request_id
+        return response
+    finally:
+        request_id_context.reset(token)

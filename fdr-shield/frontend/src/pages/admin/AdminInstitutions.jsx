@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from '../../api/client';
+import { EmptyState,ErrorState,LoadingState,useToast } from '../../components/common/PageStates';
 
 export default function AdminInstitutions() {
-  const [error, setError] = useState(''), queryClient = useQueryClient();
+  const [error, setError] = useState(''), queryClient = useQueryClient(),toast=useToast();
   const query = useQuery({ queryKey: ['admin-institutions'], queryFn: () => client.get('/institutions').then(r => r.data) });
   const create = useMutation({ mutationFn: body => client.post('/institutions', body), onSuccess: () => {
-    setError(''); queryClient.invalidateQueries({ queryKey: ['admin-institutions'] });
+    setError(''); toast('Institution created and invitation queued.'); queryClient.invalidateQueries({ queryKey: ['admin-institutions'] });
   }});
   async function submit(e) {
     e.preventDefault(); const form=e.currentTarget, body=Object.fromEntries(new FormData(form).entries());
@@ -19,6 +20,6 @@ export default function AdminInstitutions() {
       {error&&<p role="alert" className="text-red-700 sm:col-span-2">{error}</p>}
       <button disabled={create.isPending} className="rounded-lg bg-indigo-950 p-3 font-semibold text-white sm:col-span-2">{create.isPending?'Creating…':'Create institution and invite'}</button>
     </form>
-    {query.isLoading?<p>Loading institutions…</p>:query.isError?<p role="alert" className="text-red-700">Could not load institutions.</p>:<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{query.data.map(row=><article key={row.id} className="rounded-xl border bg-white p-5"><p className="text-xs font-semibold text-indigo-700">{row.aicte_id}</p><h2 className="mt-1 text-lg font-semibold">{row.name}</h2><p className="mt-1 text-sm text-slate-500">{row.state} · {row.head_name}</p><p className="mt-4 text-sm">{row.contact_email}</p></article>)}</div>}
+     {query.isLoading?<LoadingState label="Loading institutions"/>:query.isError?<ErrorState error={query.error} onRetry={()=>query.refetch()} label="Could not load institutions"/>:!query.data?.length?<EmptyState title="No institutions registered">Create an institution above to send its first account invitation.</EmptyState>:<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{query.data.map(row=><article key={row.id} className="rounded-xl border bg-white p-5"><p className="text-xs font-semibold text-indigo-700">{row.aicte_id}</p><h2 className="mt-1 text-lg font-semibold">{row.name}</h2><p className="mt-1 text-sm text-slate-500">{row.state} · {row.head_name}</p><p className="mt-4 text-sm">{row.contact_email}</p></article>)}</div>}
   </section>;
 }

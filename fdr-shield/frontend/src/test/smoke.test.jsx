@@ -8,6 +8,7 @@ import SplitViewer from '../components/fdr/SplitViewer';
 import Login from '../pages/auth/Login';
 import FileDropzone from '../components/common/FileDropzone';
 import RefundDecisionPanel from '../components/refund/RefundDecisionPanel';
+import FdrUploadForm from '../components/fdr/FdrUploadForm';
 import { useAuthStore } from '../store/authStore';
 
 vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn() } }));
@@ -28,6 +29,24 @@ describe('FDR-Shield UI smoke tests', () => {
     render(<FileDropzone required/>);
     fireEvent.change(screen.getByLabelText(/Choose a PDF or image scan/), { target: { files: [new File(['%PDF-1.4'], 'receipt.pdf', { type: 'application/pdf' })] } });
     expect(screen.getByText('receipt.pdf')).toBeInTheDocument();
+  });
+
+  it('requires review confirmation for every extracted field before FDR submission', async () => {
+    client.post.mockResolvedValueOnce({data:{fields:{fdr_number:'FDR-123',bank_name:'SBI',branch:null,amount:'1000',issue_date:'2025-01-01',maturity_date:'2030-01-01',holder:'College'},confidence:{fdr_number:.9,bank_name:.9,branch:0,amount:.9,issue_date:.9,maturity_date:.9,holder:.9}}});
+    const onSubmit=vi.fn();
+    render(<FdrUploadForm onSubmit={onSubmit}/>);
+    fireEvent.change(screen.getByLabelText(/FDR scan/),{target:{files:[new File(['%PDF-1.4'],'fdr.pdf',{type:'application/pdf'})]}});
+    fireEvent.click(screen.getByRole('button',{name:'Extract and prefill fields'}));
+    await screen.findByDisplayValue('FDR-123');
+    const submit=screen.getByRole('button',{name:'Submit confirmed FDR'});
+    expect(submit).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    screen.getAllByRole('checkbox').forEach(box=>fireEvent.click(box));
+    expect(submit).toBeEnabled();
+    fireEvent.submit(submit.closest('form'));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].get('confirmed_fields')).toContain('maturity_date');
+    expect(JSON.parse(onSubmit.mock.calls[0][0].get('field_provenance')).branch).toBe('DECLARED');
   });
 
   it('requires a reason before making a refund decision', () => {

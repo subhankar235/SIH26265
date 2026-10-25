@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date
 from sqlalchemy import select
 from app.models.fdr import FDR
 from app.models.discrepancy import Discrepancy
@@ -13,6 +12,7 @@ from app.services.audit_service import record
 from app.schemas.fdr import FDRCreate, RenewalRequest
 from app.core.enums import LifecycleState, VerificationLevel
 from app.services.workflow_state_service import sync_legacy_status, record_human_decision
+from app.core.clock import business_today
 
 ALLOWED_TRANSITIONS={FDRStatus.SUBMITTED.value:{FDRStatus.UNDER_SCRUTINY.value,FDRStatus.VERIFIED.value,FDRStatus.MISMATCH.value},FDRStatus.UNDER_SCRUTINY.value:{FDRStatus.VERIFIED.value,FDRStatus.MISMATCH.value},FDRStatus.MISMATCH.value:{FDRStatus.UNDER_SCRUTINY.value,FDRStatus.VERIFIED.value},FDRStatus.VERIFIED.value:{FDRStatus.RELEASE_REQUESTED.value,FDRStatus.RENEWAL_REQUESTED.value,FDRStatus.EXPIRED.value},FDRStatus.RELEASE_REQUESTED.value:{FDRStatus.RELEASED.value,FDRStatus.VERIFIED.value}}
 
@@ -26,7 +26,7 @@ async def get_fdr(session: AsyncSession, fdr_id: int, institution_id: int | None
 
 async def create_fdr(session: AsyncSession, data: FDRCreate, institution_id: int, user_id: int) -> FDR:
     # Insert FDR(status=SUBMITTED, trust_badge=SELF_DECLARED, declared_data=data.dict())
-    f=FDR(institution_id=institution_id,fdr_number=data.fdr_number,bank_name=data.bank_name,branch=data.branch,amount=data.amount,issue_date=data.issue_date,maturity_date=data.maturity_date,status=FDRStatus.SUBMITTED.value,lifecycle_state=LifecycleState.SUBMITTED.value,verification_level=VerificationLevel.DECLARED.value,trust_badge=TrustBadge.SELF_DECLARED.value,declared_data=data.model_dump(mode='json'))
+    f=FDR(institution_id=institution_id,fdr_number=data.fdr_number,bank_name=data.bank_name,branch=data.branch,amount=data.amount,issue_date=data.issue_date,maturity_date=data.maturity_date,status=FDRStatus.SUBMITTED.value,lifecycle_state=LifecycleState.SUBMITTED.value,verification_level=VerificationLevel.DECLARED.value,trust_badge=TrustBadge.SELF_DECLARED.value,declared_data=data.model_dump(mode='json'),is_synthetic=False)
     session.add(f); await session.flush()
     await sync_legacy_status(session, f, actor_id=user_id, event_type='FDR_SUBMITTED', previous_status=None)
     await record(session,user_id,'fdr',f.id,'created','',{'status':[None,f.status]})
@@ -77,8 +77,13 @@ async def list_fdrs(session: AsyncSession, filters: dict, scope_institution_id: 
 
 async def request_renewal(session: AsyncSession, fdr_id: int, data: RenewalRequest, user_id: int, institution_id: int | None = None) -> FDR:
     # Create replacement FDR linked to old; old -> RENEWAL_REQUESTED
-    old=await get_fdr(session,fdr_id,institution_id)
-    new=FDR(institution_id=old.institution_id,fdr_number=data.new_fdr_number,bank_name=old.bank_name,branch=old.branch,amount=data.amount,issue_date=date.today(),maturity_date=data.new_maturity_date,status=FDRStatus.SUBMITTED.value,lifecycle_state=LifecycleState.SUBMITTED.value,verification_level=VerificationLevel.DECLARED.value,trust_badge=TrustBadge.SELF_DECLARED.value,declared_data={**old.declared_data,'fdr_number':data.new_fdr_number,'amount':float(data.amount),'maturity_date':data.new_maturity_date.isoformat()},replaces_fdr_id=old.id)
+    old=await session.scalar(select(FDR).where(FDR.id==fdr_id).with_for_update())
+    if not old or (institution_id is not None and old.institution_id != institution_id): raise NotFound('FDR not found')
+    existing_replacement=await session.scalar(select(FDR.id).where(FDR.replaces_fdr_id==old.id).limit(1))
+    if existing_replacement: raise InvalidStateTransition('A renewal request already exists for this FDR.')
+    if old.status not in {FDRStatus.VERIFIED.value,FDRStatus.RENEWAL_REQUESTED.value}:
+        raise InvalidStateTransition('Renewal requires a verified FDR.')
+    new=FDR(institution_id=old.institution_id,fdr_number=data.new_fdr_number,bank_name=old.bank_name,branch=old.branch,amount=data.amount,issue_date=business_today(),maturity_date=data.new_maturity_date,status=FDRStatus.SUBMITTED.value,lifecycle_state=LifecycleState.SUBMITTED.value,verification_level=VerificationLevel.DECLARED.value,trust_badge=TrustBadge.SELF_DECLARED.value,declared_data={**old.declared_data,'fdr_number':data.new_fdr_number,'amount':float(data.amount),'maturity_date':data.new_maturity_date.isoformat()},replaces_fdr_id=old.id,is_synthetic=old.is_synthetic)
     session.add(new); await session.flush()
     previous=old.status; old.status=FDRStatus.RENEWAL_REQUESTED.value
     await sync_legacy_status(session, old, actor_id=user_id, event_type='FDR_RENEWAL_REQUESTED', previous_status=previous)
@@ -90,4 +95,4 @@ async def request_renewal(session: AsyncSession, fdr_id: int, data: RenewalReque
 
 async def days_to_maturity(fdr: FDR) -> int:
     # (maturity_date - today).days
-    return (fdr.maturity_date-date.today()).days
+    return (fdr.maturity_date-business_today()).days

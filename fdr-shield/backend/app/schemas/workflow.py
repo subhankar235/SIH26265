@@ -95,31 +95,68 @@ class CommandCancelRequest(BaseModel):
 class CommandIntentModel(BaseModel):
     """Strict allowlisted intent contract used after deterministic/LLM parsing."""
     model_config = ConfigDict(extra='forbid')
-    intent: Literal['find_maturing','list_by_state','list_overdue','list_awaiting_approval',
-        'explain_blocked','summarize_failed_notifications','pause_case','resume_case',
-        'recheck_document','retry_node']
-    args: dict[str,Any]
-    confidence: float = Field(default=1.0,ge=0,le=1)
+    intent: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(default=1.0, ge=0, le=1)
 
     @model_validator(mode='after')
     def validate_arguments(self):
-        requirements={
-            'find_maturing':{'days':int},'list_by_state':{'state':str},'list_overdue':{},
-            'list_awaiting_approval':{},'explain_blocked':{'fdr_ref':str},
-            'summarize_failed_notifications':{},'pause_case':{'fdr_ref':str},
-            'resume_case':{'fdr_ref':str},'recheck_document':{'fdr_ref':str},
-            'retry_node':{'fdr_ref':str}}
-        expected=requirements[self.intent]
-        if set(self.args)!=set(expected): raise ValueError('Intent args do not match the registered tool schema.')
-        for key,kind in expected.items():
-            value=self.args[key]
-            if kind is int and (isinstance(value,bool) or not isinstance(value,int)):
-                raise ValueError(f'{key} must be an integer.')
-            if kind is str and not isinstance(value,str): raise ValueError(f'{key} must be text.')
-        if self.intent=='find_maturing' and not 1<=self.args['days']<=365:
+        normalized = self.intent.strip().upper()
+        allowed_intents = {
+            'FIND_MATURING', 'RECHECK_DOCUMENT', 'LIST_BY_STATE', 'PREPARE_REMINDERS',
+            'LIST_OVERDUE', 'PAUSE_CASE', 'RESUME_CASE', 'RETRY_NODE',
+            'LIST_AWAITING_MY_APPROVAL', 'LIST_AWAITING_APPROVAL', 'EXPLAIN_BLOCKED',
+            'EXPLAIN_CASE_STATUS', 'SUMMARIZE_FAILED_NOTIFICATIONS', 'ESCALATE_CASES'
+        }
+        if normalized not in allowed_intents:
+            raise ValueError(f'Unsupported command intent: {self.intent}')
+        self.intent = normalized.lower()
+
+        requirements = {
+            'find_maturing': {'days': int},
+            'list_by_state': {'state': str},
+            'list_overdue': {},
+            'list_awaiting_my_approval': {},
+            'list_awaiting_approval': {},
+            'explain_blocked': {'fdr_ref': str},
+            'explain_case_status': {'fdr_ref': str},
+            'summarize_failed_notifications': {},
+            'pause_case': {'fdr_ref': str},
+            'resume_case': {'fdr_ref': str},
+            'recheck_document': {'fdr_ref': (str, list)},
+            'retry_node': {'fdr_ref': str},
+            'prepare_reminders': {'days': int},
+            'escalate_cases': {},
+        }
+        expected = requirements.get(self.intent, {})
+        for key, kind in expected.items():
+            if key not in self.args:
+                if key == 'days':
+                    self.args[key] = 30
+                elif key == 'state':
+                    self.args[key] = 'submitted'
+                else:
+                    raise ValueError(f'Missing required argument {key} for intent {self.intent}')
+            val = self.args[key]
+            if isinstance(kind, tuple):
+                if not any(isinstance(val, k) for k in kind):
+                    raise ValueError(f'{key} must be one of {kind}')
+            elif kind is int:
+                if isinstance(val, bool) or not isinstance(val, int):
+                    raise ValueError(f'{key} must be an integer.')
+            elif kind is str:
+                if not isinstance(val, str):
+                    raise ValueError(f'{key} must be text.')
+
+        if self.intent == 'find_maturing' and not 1 <= self.args.get('days', 30) <= 365:
             raise ValueError('days must be between 1 and 365.')
-        if self.intent=='list_by_state' and self.args['state'] not in {
-            'submitted','under_review','correction_required','ready_for_scrutiny','accepted',
-            'renewal_required','release_requested','awaiting_release_decision','escalated','expired','completed'}:
-            raise ValueError('State is not an allowlisted case state.')
+        if self.intent == 'list_by_state':
+            state_val = self.args.get('state')
+            valid_states = {
+                'submitted', 'under_review', 'correction_required', 'ready_for_scrutiny',
+                'accepted', 'renewal_required', 'release_requested', 'awaiting_release_decision',
+                'escalated', 'expired', 'completed', 'waiting_human', 'waiting_my_approval', 'overdue'
+            }
+            if state_val not in valid_states:
+                raise ValueError('State is not an allowlisted case state.')
         return self

@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from '../../api/client';
+import { EmptyState,ErrorState,LoadingState,useToast } from '../../components/common/PageStates';
 
 export default function AdminAccounts({ registrations = false }) {
-  const [error, setError] = useState(''), queryClient = useQueryClient();
+  const [error, setError] = useState(''), queryClient = useQueryClient(),toast=useToast();
   const query = useQuery({ queryKey: registrations ? ['admin-registrations'] : ['admin-users'],
     queryFn: () => client.get(registrations ? '/admin/registrations' : '/admin/users').then(r => r.data) });
   const create = useMutation({ mutationFn: body => client.post('/admin/users', body),
-    onSuccess: () => { setError(''); queryClient.invalidateQueries({ queryKey: ['admin-users'] }); } });
+    onSuccess: () => { setError(''); toast('Invitation created.'); queryClient.invalidateQueries({ queryKey: ['admin-users'] }); } });
   const updateRole = useMutation({ mutationFn: ({ id, role, institution_id }) => client.patch(`/admin/users/${id}`, { role, institution_id }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-users'] }) });
+    onSuccess: () => {toast('Role assignment updated.');queryClient.invalidateQueries({ queryKey: ['admin-users'] });} });
   const action = useMutation({ mutationFn: ({ id, action: name, body }) => client.post(`/admin/${registrations ? 'registrations' : 'users'}/${id}/${name}`, body || {}),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [registrations ? 'admin-registrations' : 'admin-users'] }) });
+    onSuccess: () => {toast('Account action completed.');queryClient.invalidateQueries({ queryKey: [registrations ? 'admin-registrations' : 'admin-users'] });} });
   async function submit(e) {
     e.preventDefault(); setError(''); const form = e.currentTarget; const data = Object.fromEntries(new FormData(form).entries());
     if (data.institution_id) data.institution_id = Number(data.institution_id); else data.institution_id = null;

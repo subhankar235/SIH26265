@@ -33,17 +33,23 @@ async def _scoped_workflow(session, workflow_id: int, user):
 async def list_workflows(lifecycle_state: str | None=None, execution_state: str | None=None,
                          institution_id: int | None=None, page: Pagination=Depends(pagination),
                          session: AsyncSession=Depends(get_session),user=Depends(get_current_user)):
-    query=select(WorkflowInstance).order_by(WorkflowInstance.updated_at.desc())
+    query=select(WorkflowInstance,FDR.is_synthetic).join(FDR,FDR.id==WorkflowInstance.fdr_id).order_by(WorkflowInstance.updated_at.desc())
     if lifecycle_state: query=query.where(WorkflowInstance.lifecycle_state==lifecycle_state)
     if execution_state: query=query.where(WorkflowInstance.execution_state==execution_state)
     if user.role=='institution': query=query.where(WorkflowInstance.institution_id==user.institution_id)
     elif institution_id: query=query.where(WorkflowInstance.institution_id==institution_id)
-    rows=list((await session.scalars(query.offset(page.skip).limit(page.limit))).all())
+    rows=list((await session.execute(query.offset(page.skip).limit(page.limit))).all())
     return [{'id':row.id,'fdr_id':row.fdr_id,'institution_id':row.institution_id,
         'workflow_version':row.workflow_version,'execution_version':row.execution_version,
         'lifecycle_state':row.lifecycle_state,'execution_state':row.execution_state,
         'authorization_state':row.authorization_state,'current_node':row.current_node,
-        'next_wake_at':row.next_wake_at,'updated_at':row.updated_at} for row in rows]
+        'next_wake_at':row.next_wake_at,'updated_at':row.updated_at,'is_synthetic':is_synthetic} for row,is_synthetic in rows]
+
+
+@router.get('/recommendations')
+async def workflow_recommendations(session: AsyncSession=Depends(get_session),user=Depends(OFFICIAL)):
+    from app.services.ml_service import official_recommendations
+    return await official_recommendations(session)
 
 
 @router.get('/exceptions')
@@ -77,6 +83,7 @@ async def create_approval(body: ApprovalRequest,session: AsyncSession=Depends(ge
 async def get_workflow(workflow_id: int, session: AsyncSession=Depends(get_session),
                        user=Depends(get_current_user)):
     instance=await _scoped_workflow(session,workflow_id,user)
+    fdr_origin=await session.scalar(select(FDR.is_synthetic).where(FDR.id==instance.fdr_id))
     nodes=list((await session.scalars(select(WorkflowNodeExecution).where(
         WorkflowNodeExecution.workflow_instance_id==workflow_id).order_by(WorkflowNodeExecution.id))).all())
     events=list((await session.scalars(select(WorkflowEvent).where(
@@ -84,7 +91,7 @@ async def get_workflow(workflow_id: int, session: AsyncSession=Depends(get_sessi
     checkpoints=list((await session.scalars(select(WorkflowCheckpoint).where(
         WorkflowCheckpoint.workflow_instance_id==workflow_id).order_by(WorkflowCheckpoint.id))).all())
     institution_view=user.role=='institution'
-    return {'id':instance.id,'fdr_id':instance.fdr_id,'institution_id':instance.institution_id,
+    return {'id':instance.id,'fdr_id':instance.fdr_id,'institution_id':instance.institution_id,'is_synthetic':fdr_origin,
         'workflow_version':instance.workflow_version,'execution_version':instance.execution_version,
         'lifecycle_state':instance.lifecycle_state,'execution_state':instance.execution_state,
         'authorization_state':instance.authorization_state,'current_node':instance.current_node,
@@ -193,68 +200,147 @@ async def retry_workflow_node(workflow_id: int,body: RetryNodeRequest,
 
 
 @router.get('/{workflow_id}/events')
-async def workflow_events(workflow_id: int,after: int=0,page: Pagination=Depends(pagination),
-                          session: AsyncSession=Depends(get_session),user=Depends(get_current_user)):
-    await _scoped_workflow(session,workflow_id,user)
-    rows=list((await session.scalars(select(WorkflowEvent).where(
-        WorkflowEvent.workflow_instance_id==workflow_id,WorkflowEvent.id>after)
+async def workflow_events(workflow_id: int, after: int = 0, page: Pagination = Depends(pagination),
+                          session: AsyncSession = Depends(get_session), user = Depends(get_current_user)):
+    await _scoped_workflow(session, workflow_id, user)
+    rows = list((await session.scalars(select(WorkflowEvent).where(
+        WorkflowEvent.workflow_instance_id == workflow_id, WorkflowEvent.id > after)
         .order_by(WorkflowEvent.id).offset(page.skip).limit(page.limit))).all())
-    return [{'id':row.id,'type':row.event_type,'payload':row.payload,
-        'received_at':row.received_at,'processed_at':row.processed_at} for row in rows]
+    institution_view = user.role == 'institution'
+    return [{'id': row.id, 'type': row.event_type,
+             'payload': row.payload if not institution_view else {k: v for k, v in (row.payload or {}).items() if not k.startswith('_') and k not in {'diagnostics', 'error_class'}},
+             'received_at': row.received_at, 'processed_at': row.processed_at} for row in rows]
 
 
 @router.get('/{workflow_id}/stream')
-async def stream_workflow(workflow_id: int,request: Request,after: int=0,
-                          session: AsyncSession=Depends(get_session),user=Depends(get_current_user)):
-    await _scoped_workflow(session,workflow_id,user)
-    last_event_id=request.headers.get('last-event-id')
-    if last_event_id and last_event_id.isdigit(): after=max(after,int(last_event_id))
+async def stream_workflow(workflow_id: int, request: Request, after: int = 0,
+                          session: AsyncSession = Depends(get_session), user = Depends(get_current_user)):
+    instance = await _scoped_workflow(session, workflow_id, user)
+    # 8.3 Client reconnect with Last-Event-ID
+    last_event_id = request.headers.get('last-event-id') or request.query_params.get('last_event_id')
+    if last_event_id and str(last_event_id).isdigit():
+        after = max(after, int(last_event_id))
+
+    from app.services.event_bus import get_event_bus
+    bus = get_event_bus()
+    institution_view = user.role == 'institution'
+
+    def sanitize_payload(payload: dict) -> dict:
+        if not institution_view:
+            return payload
+        # 8.4 Per-event scope filter: institution isolation strips internal diagnostics
+        return {k: v for k, v in (payload or {}).items() if not k.startswith('_') and k not in {'diagnostics', 'error_class', 'raw_ref'}}
+
     async def stream():
-        cursor=after
-        for _ in range(120):
-            if await request.is_disconnected(): return
-            async with SessionLocal() as event_session:
-                live_user=await event_session.get(User,user.id)
-                state=await event_session.get(WorkflowInstance,workflow_id)
-                if not live_user or not live_user.is_active or live_user.status!='active' or not state:
-                    yield 'event: stream.revoked\ndata: {}\n\n';return
-                if live_user.role=='institution' and state.institution_id!=live_user.institution_id:
-                    yield 'event: stream.revoked\ndata: {}\n\n';return
-                events=list((await event_session.scalars(select(WorkflowEvent).where(
-                    WorkflowEvent.workflow_instance_id==workflow_id,WorkflowEvent.id>cursor)
-                    .order_by(WorkflowEvent.id).limit(100))).all())
-            for event in events:
-                cursor=event.id
-                yield f'id: {event.id}\nevent: {event.event_type}\ndata: {json.dumps(event.payload,default=str)}\n\n'
-            if state and state.execution_state in {ExecutionState.COMPLETED.value,ExecutionState.BLOCKED.value,ExecutionState.FAILED.value,ExecutionState.CANCELLED.value}:
-                yield 'event: stream.complete\ndata: {}\n\n';return
-            if not events: yield ': heartbeat\n\n'
-            await asyncio.sleep(1)
-    return StreamingResponse(stream(),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+        cursor = after
+        # 8.3 Replay from workflow_event table
+        async with SessionLocal() as replay_session:
+            history = list((await replay_session.scalars(select(WorkflowEvent).where(
+                WorkflowEvent.workflow_instance_id == workflow_id,
+                WorkflowEvent.id > cursor
+            ).order_by(WorkflowEvent.id).limit(200))).all())
+        for event in history:
+            cursor = event.id
+            safe_payload = sanitize_payload(event.payload)
+            yield f'id: {event.id}\nevent: {event.event_type}\ndata: {json.dumps(safe_payload, default=str)}\n\n'
+
+        channel = f"workflow:{workflow_id}"
+        async for broadcast_event in bus.subscribe(channel):
+            if await request.is_disconnected():
+                return
+
+            # Live user and authorization revocation check
+            async with SessionLocal() as check_session:
+                live_user = await check_session.get(User, user.id)
+                state = await check_session.get(WorkflowInstance, workflow_id)
+
+            if not live_user or not live_user.is_active or live_user.status != 'active' or not state:
+                yield 'event: stream.revoked\ndata: {}\n\n'
+                return
+
+            # 8.4 Institution isolation check
+            if live_user.role == 'institution' and state.institution_id != live_user.institution_id:
+                yield 'event: stream.revoked\ndata: {}\n\n'
+                return
+
+            if broadcast_event is None:
+                # Periodic heartbeat
+                yield ': heartbeat\n\n'
+                # Check if terminal state reached
+                if state and state.execution_state in {
+                    ExecutionState.COMPLETED.value, ExecutionState.BLOCKED.value,
+                    ExecutionState.FAILED.value, ExecutionState.CANCELLED.value
+                }:
+                    yield 'event: stream.complete\ndata: {}\n\n'
+                    return
+                continue
+
+            # Dedup already replayed events
+            if broadcast_event.id is not None and broadcast_event.id <= cursor:
+                continue
+
+            event_id_str = f"id: {broadcast_event.id}\n" if broadcast_event.id is not None else ""
+            if broadcast_event.id is not None:
+                cursor = broadcast_event.id
+            safe_payload = sanitize_payload(broadcast_event.payload)
+            yield f"{event_id_str}event: {broadcast_event.event_type}\ndata: {json.dumps(safe_payload, default=str)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
 
 
 @router.get('/exceptions/stream')
-async def stream_exceptions(request: Request,after: int=0,
-                            user=Depends(OFFICIAL),session: AsyncSession=Depends(get_session)):
-    last_event_id=request.headers.get('last-event-id')
-    if last_event_id and last_event_id.isdigit(): after=max(after,int(last_event_id))
+async def stream_exceptions(request: Request, after: int = 0,
+                            user = Depends(OFFICIAL), session: AsyncSession = Depends(get_session)):
+    # 8.3 Client reconnect with Last-Event-ID
+    last_event_id = request.headers.get('last-event-id') or request.query_params.get('last_event_id')
+    if last_event_id and str(last_event_id).isdigit():
+        after = max(after, int(last_event_id))
+
+    from app.services.event_bus import get_event_bus
+    from app.services.workflow_events import EXCEPTIONS_INBOX_EVENTS
+    bus = get_event_bus()
+
     async def inbox_stream():
-        cursor=after
-        for _ in range(120):
-            if await request.is_disconnected(): return
-            async with SessionLocal() as event_session:
-                live_user=await event_session.get(User,user.id)
-                if not live_user or not live_user.is_active or live_user.status!='active' or live_user.role!='aicte_official':
-                    yield 'event: stream.revoked\ndata: {}\n\n';return
-                rows=list((await event_session.scalars(select(WorkflowEvent).where(
-                    WorkflowEvent.id>cursor,WorkflowEvent.event_type.in_(
-                        ['exception.created','EXCEPTION_CLAIMED','EXCEPTION_RESOLVED',
-                         'OFFICIAL_ESCALATED_EXCEPTION','CORRECTION_SLA_EXPIRED']))
-                    .order_by(WorkflowEvent.id).limit(100))).all())
-            for event in rows:
-                cursor=event.id
-                yield f'id: {event.id}\nevent: {event.event_type}\ndata: {json.dumps(event.payload,default=str)}\n\n'
-            if not rows: yield ': heartbeat\n\n'
-            await asyncio.sleep(2)
-    return StreamingResponse(inbox_stream(),media_type='text/event-stream',
-        headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+        cursor = after
+        # 8.3 Replay existing exception events
+        async with SessionLocal() as replay_session:
+            history = list((await replay_session.scalars(select(WorkflowEvent).where(
+                WorkflowEvent.id > cursor,
+                WorkflowEvent.event_type.in_(EXCEPTIONS_INBOX_EVENTS)
+            ).order_by(WorkflowEvent.id).limit(100))).all())
+        for event in history:
+            cursor = event.id
+            yield f'id: {event.id}\nevent: {event.event_type}\ndata: {json.dumps(event.payload, default=str)}\n\n'
+
+        async for broadcast_event in bus.subscribe("inbox:exceptions"):
+            if await request.is_disconnected():
+                return
+
+            async with SessionLocal() as check_session:
+                live_user = await check_session.get(User, user.id)
+
+            if not live_user or not live_user.is_active or live_user.status != 'active' or live_user.role not in {'aicte_official', 'admin'}:
+                yield 'event: stream.revoked\ndata: {}\n\n'
+                return
+
+            if broadcast_event is None:
+                yield ': heartbeat\n\n'
+                continue
+
+            if broadcast_event.id is not None and broadcast_event.id <= cursor:
+                continue
+
+            event_id_str = f"id: {broadcast_event.id}\n" if broadcast_event.id is not None else ""
+            if broadcast_event.id is not None:
+                cursor = broadcast_event.id
+            yield f"{event_id_str}event: {broadcast_event.event_type}\ndata: {json.dumps(broadcast_event.payload, default=str)}\n\n"
+
+    return StreamingResponse(
+        inbox_stream(),
+        media_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )

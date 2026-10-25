@@ -1,5 +1,5 @@
 """Admin-only account management and registration approvals."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session
@@ -14,6 +14,134 @@ from app.services import user_admin_service
 
 router = APIRouter()
 ADMIN = require_roles(Role.ADMIN)
+
+
+@router.get('/operations/health')
+async def operations_health(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_ops_service import generate_health_report
+    return await generate_health_report(session)
+
+
+@router.get('/operations/failed-jobs')
+async def operations_failed_jobs(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_ops_service import get_failed_jobs
+    return await get_failed_jobs(session)
+
+
+@router.get('/operations/stuck-cases')
+async def operations_stuck_cases(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_ops_service import get_stuck_cases
+    return await get_stuck_cases(session)
+
+
+@router.get('/operations/delivery-failures')
+async def operations_delivery_failures(hours: int = 24, session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    if hours < 1 or hours > 720:
+        raise HTTPException(422, 'hours must be between 1 and 720')
+    from app.services.admin_ops_service import get_delivery_failures
+    return await get_delivery_failures(session, hours)
+
+
+@router.get('/operations/recovery-recommendations')
+async def operations_recovery_recommendations(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_ops_service import recommend_recovery
+    return await recommend_recovery(session)
+
+
+@router.post('/operations/actions/{action}')
+async def operations_safe_action(action: str, body: dict = Body(...), session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_ops_service import requeue_failed_job, send_test_alert
+    confirmed = body.get('confirmed') is True
+    if action == 'requeue-failed-job':
+        try:
+            outbox_id = int(body.get('outbox_id'))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, 'outbox_id must be an integer') from exc
+        return await requeue_failed_job(session, actor, outbox_id, confirmed)
+    if action == 'send-test-alert':
+        channel = body.get('channel', 'email')
+        recipient = body.get('recipient', actor.email)
+        if channel not in {'email', 'telegram', 'whatsapp_mock'} or not isinstance(recipient, str) or not recipient.strip():
+            raise HTTPException(422, 'A supported channel and non-empty recipient are required')
+        return await send_test_alert(session, actor, channel, recipient.strip(), confirmed)
+    raise HTTPException(404, 'Unsupported operations action')
+
+
+@router.get('/rules')
+async def list_automation_rules(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_rules_service import list_rules
+    return await list_rules(session)
+
+
+@router.post('/rules', status_code=201)
+async def create_automation_rule(body: dict = Body(...), session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_rules_service import create_rule
+    return await create_rule(session, actor, body.get('rule_key', ''), body.get('description', ''), body.get('policy'))
+
+
+@router.post('/rules/{rule_id}/versions', status_code=201)
+async def create_automation_rule_version(rule_id: int, body: dict = Body(...),
+                                         session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.admin_rules_service import append_version
+    return await append_version(session, actor, rule_id, body.get('policy'))
+
+
+@router.get('/ml/gates')
+async def ml_gate_status(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.ml_service import assess_gates
+    return await assess_gates(session)
+
+
+@router.post('/ml/gates/evaluate')
+async def ml_evaluate_gates(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.ml_service import register_gate_evaluation
+    return await register_gate_evaluation(session, actor)
+
+
+@router.post('/ml/demo-data')
+async def ml_generate_demo_data(body: dict = Body(default={}), session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.ml_service import generate_synthetic_demo_data
+    return await generate_synthetic_demo_data(session, actor, body.get('count', 200), body.get('seed', 202613))
+
+
+@router.get('/ml/registry')
+async def ml_registry(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.ml_service import list_registry
+    return await list_registry(session)
+
+
+@router.get('/ml/demo-samples')
+async def ml_demo_samples(limit: int = 100, session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    if limit < 1 or limit > 1000: raise HTTPException(422, 'limit must be between 1 and 1000')
+    from app.services.ml_service import list_demo_samples
+    return await list_demo_samples(session, limit)
+
+
+@router.get('/ml/predictions')
+async def ml_predictions(is_synthetic: bool | None = None, limit: int = 100,
+                         session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    if limit < 1 or limit > 1000: raise HTTPException(422, 'limit must be between 1 and 1000')
+    from app.services.ml_service import list_predictions
+    return await list_predictions(session, is_synthetic, limit)
+
+
+@router.post('/ml/predictions/run')
+async def ml_run_fallbacks(body: dict = Body(default={}), idempotency_key: str = Header(...,alias='Idempotency-Key',min_length=8,max_length=255),
+                           session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.ml_service import run_fallback_predictions
+    return await run_fallback_predictions(session, actor, body.get('use_case', 'all'), body.get('limit', 100), idempotency_key)
+
+
+@router.get('/audit/verify-chain')
+async def verify_audit_hash_chain(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.audit_service import verify_audit_chain
+    return await verify_audit_chain(session)
+
+
+@router.get('/audit/export')
+async def export_audit_hash_chain(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    from app.services.audit_service import export_audit_chain
+    return await export_audit_chain(session)
 
 
 @router.get('/users', response_model=list[AdminUserOut])

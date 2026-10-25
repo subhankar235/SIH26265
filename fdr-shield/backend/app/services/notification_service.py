@@ -12,6 +12,7 @@ from app.services.workflow_state_service import sync_legacy_status
 from sqlalchemy import select
 from datetime import datetime, timezone
 from app.services.outbox_service import enqueue as enqueue_outbox
+from app.core.clock import business_today
 
 
 async def stage_for(days_left: int) -> AlertStage | None:
@@ -46,7 +47,7 @@ async def dispatch_alert(session: AsyncSession, fdr: FDR, stage: AlertStage) -> 
 async def escalate_to_bureau(session: AsyncSession, fdr: FDR) -> None:
     # On T-0 with no renewal: mark ESCALATED, notify bureau chief users
     previous_status=fdr.status
-    fdr.status=FDRStatus.EXPIRED.value if fdr.maturity_date.isoformat() < datetime.now(timezone.utc).date().isoformat() else fdr.status
+    fdr.status=FDRStatus.EXPIRED.value if fdr.maturity_date < business_today() else fdr.status
     if previous_status!=fdr.status:
         await sync_legacy_status(session, fdr, event_type='FDR_EXPIRED_ESCALATION', previous_status=previous_status)
         await record(session,None,'fdr',fdr.id,'expired','scheduler',{'status':[previous_status,fdr.status]})

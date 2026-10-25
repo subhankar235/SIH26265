@@ -2,10 +2,11 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select,func,case,and_
-from datetime import date,timedelta
+from datetime import timedelta
 from app.models.fdr import FDR
 from app.models.discrepancy import Discrepancy
 from app.schemas.dashboard import DashboardOut,MetricCards,ChartPoint
+from app.core.clock import business_today
 
 
 async def bureau_metrics(session: AsyncSession) -> DashboardOut:
@@ -21,14 +22,16 @@ async def _metrics(session,institution_id):
     import asyncio
     from redis import Redis
     from app.core.config import get_settings
-    key=f'fdr-dashboard:{institution_id or "bureau"}'
+    key=f'fdr-dashboard:v2:{institution_id or "bureau"}'
     try:
         cached=await asyncio.to_thread(Redis.from_url(get_settings().redis_url,decode_responses=True).get,key)
         if cached:return DashboardOut.model_validate_json(cached)
     except Exception:pass
-    filters=[]
+    filters=[FDR.is_synthetic.is_(False)]
     if institution_id:filters.append(FDR.institution_id==institution_id)
-    today=date.today(); until=today+timedelta(days=30)
+    all_scope=[]
+    if institution_id:all_scope.append(FDR.institution_id==institution_id)
+    today=business_today(); until=today+timedelta(days=30)
     totals=select(
         func.coalesce(func.sum(case((FDR.status.notin_(['released','expired','renewal_requested']),FDR.amount),else_=0)),0).label('active_value'),
         func.coalesce(func.sum(case((and_(FDR.maturity_date>=today,FDR.maturity_date<=until),1),else_=0)),0).label('expiring'),
@@ -37,7 +40,10 @@ async def _metrics(session,institution_id):
     )
     if filters:totals=totals.where(*filters)
     totals=(await session.execute(totals)).one()
-    metrics=MetricCards(total_active_value=float(totals.active_value),expiring_30d=int(totals.expiring),pending_verifications=int(totals.pending),discrepancies_flagged=int(totals.discrepancies))
+    synthetic_count=await session.scalar(select(func.count(FDR.id)).where(*all_scope,FDR.is_synthetic.is_(True)))
+    unclassified_count=await session.scalar(select(func.count(FDR.id)).where(*all_scope,FDR.is_synthetic.is_(None)))
+    metrics=MetricCards(total_active_value=float(totals.active_value),expiring_30d=int(totals.expiring),pending_verifications=int(totals.pending),discrepancies_flagged=int(totals.discrepancies),
+        synthetic_records=int(synthetic_count or 0),unclassified_records=int(unclassified_count or 0))
     bank_query=select(FDR.bank_name,func.sum(FDR.amount)).group_by(FDR.bank_name)
     status_query=select(FDR.status,func.count(FDR.id)).group_by(FDR.status)
     maturity_query=select(FDR.maturity_date)
