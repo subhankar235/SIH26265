@@ -99,6 +99,8 @@ Celery tasks are sync entry points: wrap async service calls with `asyncio.run(.
 
 `api/v1/workflows.py` exposes case/node/event/checkpoint reads, SSE, exception inbox, approval, claim, pause/resume, retry/replay/version and comparison endpoints. `api/v1/commands.py` provides a typed allowlisted command plan/confirm/cancel/history/stream flow. `COMMAND_LLM_ENABLED=false` by default. When explicitly configured, the Command Center uses an OpenAI-compatible LLM for structured intent parsing; missing/malformed/unavailable provider output falls back to the deterministic parser. The institution assistant similarly falls back to its deterministic response. All generated output remains constrained by server allowlists, scoped data, role checks and confirmation. Official pages include `WorkflowControlRoom`, `WorkflowExecution`, `ExceptionInbox`, and `CommandCenter`.
 
+Public Institution and AICTE Official applications verify email before entering approval queues. AICTE Officials decide Institution applications; the Super Admin (stored role `admin` for backward compatibility) approves/rejects Official applications, may decide Institution applications directly, and can audit-log overrides of verified public-application decisions. The one-time setup page at `/super-admin/setup` posts to `/api/v1/auth/register/super-admin`; it requires `SUPER_ADMIN_SETUP_SECRET` in the backend environment, stores only an Argon2id password hash, and uses the same PostgreSQL advisory/SQLite immediate lock as the CLI bootstrap. It closes permanently after a Super Admin row is created; no additional public Super Admin signup is available.
+
 ### mock_bank_api/ (DEMO, separate service)
 `main.py` mounts `banks/sbi.py`, `pnb.py`, `hdfc.py`; `store.py` loads `data/seed_fdrs.json`. Each bank may return slightly different field names; `bank_verification_service` normalizes them to `BankVerifyResponse`. **Never call real bank APIs.**
 
@@ -169,7 +171,7 @@ Dashboard: BureauDashboard -> useBureauDashboard -> /dashboard/bureau
 | Anything that mutates state -> `audit_service.record` | `(user_id, entity, entity_id, action, ip, delta{field:[old,new]})` |
 
 ### 4.3 Auth flow
-Role login page -> `/auth/login/{portal}` -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Backend checks active account status and `require_roles` on every protected request.
+One shared login page at `/login` -> `POST /api/v1/auth/login` -> backend derives role from the matched user row -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Legacy role-specific login URLs redirect to `/login`; protected APIs independently check active account status and `require_roles`.
 
 ## 5. Suggested build order (hackathon, 3 days)
 **Day 1 (skeleton that runs):** `core/*` -> `models` + migration -> `auth` router -> `seed.py` -> frontend `Login`, `authStore`, `RoleGuard`, `Layout`.

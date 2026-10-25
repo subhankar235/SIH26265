@@ -79,7 +79,7 @@ async def create_approval(body: ApprovalRequest,session: AsyncSession=Depends(ge
     return await actions.submit_approval(session,user,body)
 
 
-@router.get('/{workflow_id}')
+@router.get('/{workflow_id:int}')
 async def get_workflow(workflow_id: int, session: AsyncSession=Depends(get_session),
                        user=Depends(get_current_user)):
     instance=await _scoped_workflow(session,workflow_id,user)

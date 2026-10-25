@@ -6,12 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.deps import get_current_user, get_client_ip
-from app.core.enums import Role
-from app.core.exceptions import AuthError, RateLimitError
+from app.core.exceptions import AccountStatusError, AuthError, RateLimitError
 from app.core.security import make_csrf_token
 from app.schemas.auth import (LoginRequest, MfaVerifyRequest, PasswordChangeRequest,
     InstitutionRegistrationRequest, ForgotPasswordRequest, TokenBody, ResetPasswordRequest,
-    InviteAcceptRequest)
+    InviteAcceptRequest, OfficialRegistrationRequest)
+from app.schemas.super_admin_setup import SuperAdminSetupRequest
 from app.services import auth_service
 
 router = APIRouter()
@@ -50,12 +50,15 @@ def _clear_session(response: Response) -> None:
     response.delete_cookie(COOKIE_CSRF, path='/', **options)
 
 
-async def _portal_login(portal: str, body: LoginRequest, request: Request,
+async def _shared_login(body: LoginRequest, request: Request,
                         response: Response, session: AsyncSession) -> dict:
     try:
-        data = await auth_service.login(session, str(body.email), body.password, portal,
+        data = await auth_service.login(session, str(body.email), body.password, None,
             get_client_ip(request), request.headers.get('user-agent'))
     except RateLimitError:
+        await session.commit()
+        raise
+    except AccountStatusError:
         await session.commit()
         raise
     except AuthError:
@@ -71,22 +74,29 @@ async def _portal_login(portal: str, body: LoginRequest, request: Request,
     return {'mfa_required': False, 'user': data['user']}
 
 
-@router.post('/login/institution')
-async def institution_login(body: LoginRequest, request: Request, response: Response,
-                            session: AsyncSession = Depends(get_session)):
-    return await _portal_login(Role.INSTITUTION.value, body, request, response, session)
+@router.post('/login')
+async def shared_login(body: LoginRequest, request: Request, response: Response,
+                       session: AsyncSession = Depends(get_session)):
+    """Single login endpoint; role is resolved from the matched database account."""
+    return await _shared_login(body, request, response, session)
 
 
-@router.post('/login/official')
-async def official_login(body: LoginRequest, request: Request, response: Response,
-                         session: AsyncSession = Depends(get_session)):
-    return await _portal_login(Role.AICTE_OFFICIAL.value, body, request, response, session)
+@router.post('/login/institution', include_in_schema=False)
+async def institution_login_compat(body: LoginRequest, request: Request, response: Response,
+                                   session: AsyncSession = Depends(get_session)):
+    return await _shared_login(body, request, response, session)
 
 
-@router.post('/login/admin')
-async def admin_login(body: LoginRequest, request: Request, response: Response,
-                      session: AsyncSession = Depends(get_session)):
-    return await _portal_login(Role.ADMIN.value, body, request, response, session)
+@router.post('/login/official', include_in_schema=False)
+async def official_login_compat(body: LoginRequest, request: Request, response: Response,
+                                session: AsyncSession = Depends(get_session)):
+    return await _shared_login(body, request, response, session)
+
+
+@router.post('/login/admin', include_in_schema=False)
+async def admin_login_compat(body: LoginRequest, request: Request, response: Response,
+                             session: AsyncSession = Depends(get_session)):
+    return await _shared_login(body, request, response, session)
 
 
 @router.post('/mfa/verify')
@@ -168,6 +178,38 @@ async def register_institution(body: InstitutionRegistrationRequest, request: Re
         await auth_service._send_registration_ack(str(body.email))
     except ValueError as exc: raise HTTPException(422, str(exc)) from exc
     return {'message': 'If the registration can be processed, an email verification link will be sent.'}
+
+
+@router.post('/register/official', status_code=202)
+async def register_official(body: OfficialRegistrationRequest, request: Request,
+                            session: AsyncSession = Depends(get_session)):
+    await auth_service.throttle_public_action(session, 'official_register', str(body.email), get_client_ip(request), 5, 60)
+    try:
+        await auth_service.register_official(session, body, get_client_ip(request))
+    except IntegrityError:
+        await session.rollback()
+        await auth_service._send_registration_ack(str(body.email))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {'message': 'If the application can be processed, an email verification link will be sent.'}
+
+
+@router.post('/register/super-admin', status_code=201)
+async def register_initial_super_admin(body: SuperAdminSetupRequest, request: Request,
+                                       session: AsyncSession = Depends(get_session)):
+    settings = get_settings()
+    if not settings.super_admin_setup_secret:
+        raise HTTPException(503, 'Initial Super Admin setup is unavailable.')
+    from app.services.rate_limit_service import enforce_rate_limit
+    await enforce_rate_limit('super-admin-setup', get_client_ip(request), 5, 3600)
+    from app.services.super_admin_setup_service import register_initial_super_admin as create_initial
+    from sqlalchemy.exc import IntegrityError
+    try:
+        await create_initial(session, body)
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(409, 'Initial Super Admin setup has already been completed or the email is unavailable.') from exc
+    return {'message': 'Initial Super Admin account created. You can now sign in.'}
 
 
 @router.post('/verify-email', status_code=204)

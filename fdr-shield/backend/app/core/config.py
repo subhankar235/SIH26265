@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     lockout_minutes: int = 15
     initial_admin_email: str = ''
     initial_admin_password: str = ''
+    super_admin_setup_secret: str = ''
     mfa_encryption_key: str = ''
     frontend_origin: str = 'http://localhost:5173'
     s3_endpoint: str = 'http://localhost:9000'

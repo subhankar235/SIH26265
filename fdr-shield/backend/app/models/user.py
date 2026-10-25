@@ -10,7 +10,7 @@ class User(Base):
     __tablename__ = 'users'
     __table_args__ = (Index('ix_users_role_status', 'role', 'status'),
         CheckConstraint("role IN ('institution','aicte_official','admin')", name='ck_users_role'),
-        CheckConstraint("status IN ('invited','pending_email_verify','pending_approval','active','locked','disabled')", name='ck_users_status'),
+        CheckConstraint("status IN ('invited','pending_email_verify','pending_approval','active','locked','suspended','rejected','disabled')", name='ck_users_status'),
         CheckConstraint("(role = 'institution' AND institution_id IS NOT NULL) OR (role <> 'institution' AND institution_id IS NULL)", name='ck_users_role_institution'))
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
@@ -21,6 +21,7 @@ class User(Base):
     mfa_secret_enc: Mapped[str | None] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     full_name: Mapped[str] = mapped_column(String(255), default='')
+    phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default='active', index=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0)

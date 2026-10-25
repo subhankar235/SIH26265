@@ -29,8 +29,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
             path = request.url.path
-            public_auth = path.endswith(('/auth/login/institution', '/auth/login/official', '/auth/login/admin',
-                '/auth/register/institution', '/auth/forgot-password', '/auth/reset-password',
+            public_auth = path.endswith(('/auth/login', '/auth/login/institution', '/auth/login/official', '/auth/login/admin',
+                '/auth/register/institution', '/auth/register/official', '/auth/register/super-admin', '/auth/forgot-password', '/auth/reset-password',
                 '/auth/verify-email', '/auth/accept-invite'))
             cookie_session = any(request.cookies.get(name) for name in ('access_token', 'refresh_token', 'mfa_token'))
             if cookie_session and not public_auth:

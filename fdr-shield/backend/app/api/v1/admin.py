@@ -4,12 +4,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session
 from app.core.deps import Pagination, get_current_user, pagination, require_roles
-from app.core.enums import AccountStatus, Role
+from app.core.enums import Role
 from app.core.exceptions import InvalidStateTransition
 from app.models.user import User
 from app.models.notification import Notification
 from app.models.workflow import NotificationDeliveryAttempt, OutboxEvent
-from app.schemas.auth import AdminUserCreate, AdminUserOut, AdminUserUpdate, RegistrationDecision
+from app.schemas.auth import AdminUserCreate, AdminUserOut, AdminUserUpdate, RegistrationDecision, RegistrationDecisionRequest
 from app.services import user_admin_service
 
 router = APIRouter()
@@ -173,6 +173,11 @@ async def enable_user(user_id: int, session: AsyncSession = Depends(get_session)
     return await user_admin_service.set_user_active(session, user_id, True, actor)
 
 
+@router.post('/users/{user_id}/suspend', response_model=AdminUserOut)
+async def suspend_user(user_id: int, session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    return await user_admin_service.suspend_user(session, user_id, actor)
+
+
 @router.post('/users/{user_id}/unlock', response_model=AdminUserOut)
 async def unlock_user(user_id: int, session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
     return await user_admin_service.unlock_user(session, user_id, actor)
@@ -190,13 +195,17 @@ async def revoke_sessions(user_id: int, session: AsyncSession = Depends(get_sess
 
 
 @router.get('/registrations', response_model=list[AdminUserOut])
-async def pending_registrations(page: Pagination = Depends(pagination), session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
-    return await user_admin_service.list_users(session, Role.INSTITUTION.value, AccountStatus.PENDING_APPROVAL.value, None, page)
+async def pending_registrations(include_decided: bool = False, page: Pagination = Depends(pagination),
+        session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    if include_decided:
+        return await user_admin_service.list_institution_registration_history(session, page)
+    return await user_admin_service.list_pending_registrations(session, Role.INSTITUTION.value, page)
 
 
 @router.post('/registrations/{user_id}/approve', response_model=AdminUserOut)
-async def approve_registration(user_id: int, session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
-    return await user_admin_service.approve_registration(session, user_id, True, None, actor)
+async def approve_registration(user_id: int, body: RegistrationDecision | None = None,
+        session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    return await user_admin_service.approve_registration(session, user_id, True, body.reason if body else None, actor)
 
 
 @router.post('/registrations/{user_id}/reject', response_model=AdminUserOut)
@@ -204,6 +213,40 @@ async def reject_registration(user_id: int, body: RegistrationDecision, session:
     if not body.reason:
         raise HTTPException(422, 'A rejection reason is required.')
     return await user_admin_service.approve_registration(session, user_id, False, body.reason, actor)
+
+
+@router.get('/official-registrations', response_model=list[AdminUserOut])
+async def pending_official_registrations(include_decided: bool = False, page: Pagination = Depends(pagination),
+        session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    return await user_admin_service.list_pending_registrations(session, Role.AICTE_OFFICIAL.value, page,
+        include_decided=include_decided)
+
+
+@router.post('/official-registrations/{user_id}/approve', response_model=AdminUserOut)
+async def approve_official_registration(user_id: int, body: RegistrationDecision | None = None,
+        session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    return await user_admin_service.decide_registration(session, user_id, True, body.reason if body else None, actor)
+
+
+@router.post('/official-registrations/{user_id}/reject', response_model=AdminUserOut)
+async def reject_official_registration(user_id: int, body: RegistrationDecision, session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    if not body.reason:
+        raise HTTPException(422, 'A rejection reason is required.')
+    return await user_admin_service.decide_registration(session, user_id, False, body.reason, actor)
+
+
+@router.post('/official-registrations/{user_id}/override', response_model=AdminUserOut)
+async def override_official_registration(user_id: int, body: RegistrationDecisionRequest,
+        session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    return await user_admin_service.decide_registration(session, user_id,
+        body.decision == 'approve', body.reason, actor, override=True)
+
+
+@router.post('/registrations/{user_id}/override', response_model=AdminUserOut)
+async def override_institution_registration(user_id: int, body: RegistrationDecisionRequest,
+        session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
+    return await user_admin_service.decide_registration(session, user_id,
+        body.decision == 'approve', body.reason, actor, override=True)
 
 
 @router.get('/notification-deliveries')

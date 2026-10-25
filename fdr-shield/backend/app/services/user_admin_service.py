@@ -3,7 +3,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import AccountStatus, Role
-from app.core.exceptions import NotFound, InvalidStateTransition
+from app.core.exceptions import NotFound, InvalidStateTransition, PermissionDenied
 from app.core.config import get_settings
 from app.models.auth_records import RefreshToken
 from app.models.institution import Institution
@@ -56,6 +56,25 @@ async def list_users(session: AsyncSession, role: str | None, status: str | None
     return list((await session.scalars(stmt.offset(page.skip).limit(page.limit))).all())
 
 
+async def list_pending_registrations(session: AsyncSession, role: str, page, *, include_decided: bool = False) -> list[User]:
+    if role not in {Role.INSTITUTION.value, Role.AICTE_OFFICIAL.value}:
+        raise ValueError('Only Institution and AICTE Official applications are reviewable.')
+    stmt = select(User).where(User.role == role)
+    if include_decided:
+        stmt = stmt.where(User.created_by.is_(None), User.email_verified_at.is_not(None))
+    else:
+        stmt = stmt.where(User.status == AccountStatus.PENDING_APPROVAL.value)
+    stmt = stmt.order_by(User.created_at, User.id)
+    return list((await session.scalars(stmt.offset(page.skip).limit(page.limit))).all())
+
+
+async def list_institution_registration_history(session: AsyncSession, page) -> list[User]:
+    """Return publicly submitted, email-verified Institution applications for Super Admin oversight."""
+    stmt = select(User).where(User.role == Role.INSTITUTION.value,
+        User.created_by.is_(None), User.email_verified_at.is_not(None)).order_by(User.created_at.desc(), User.id.desc())
+    return list((await session.scalars(stmt.offset(page.skip).limit(page.limit))).all())
+
+
 async def update_user(session: AsyncSession, user_id: int, data: AdminUserUpdate, actor: User) -> User:
     target = await session.get(User, user_id)
     if not target: raise NotFound('User not found.')
@@ -86,8 +105,8 @@ async def update_user(session: AsyncSession, user_id: int, data: AdminUserUpdate
 async def set_user_active(session: AsyncSession, user_id: int, active: bool, actor: User) -> User:
     target = await session.get(User, user_id)
     if not target: raise NotFound('User not found.')
-    if active and target.status not in {AccountStatus.DISABLED.value, AccountStatus.ACTIVE.value}:
-        raise InvalidStateTransition('Only disabled accounts can be re-enabled; pending and locked accounts must follow their dedicated workflow.')
+    if active and target.status not in {AccountStatus.DISABLED.value, AccountStatus.SUSPENDED.value, AccountStatus.ACTIVE.value}:
+        raise InvalidStateTransition('Only disabled or suspended accounts can be re-enabled; pending, rejected, and locked accounts must follow their dedicated workflow.')
     if target.id == actor.id and not active:
         raise InvalidStateTransition('You cannot disable your own account.')
     if not active and target.role == Role.ADMIN.value and target.status == AccountStatus.ACTIVE.value:
@@ -107,6 +126,27 @@ async def set_user_active(session: AsyncSession, user_id: int, active: bool, act
     return target
 
 
+async def suspend_user(session: AsyncSession, user_id: int, actor: User) -> User:
+    target = await session.get(User, user_id)
+    if not target: raise NotFound('User not found.')
+    if target.id == actor.id:
+        raise InvalidStateTransition('You cannot suspend your own account.')
+    if target.role == Role.ADMIN.value and target.status == AccountStatus.ACTIVE.value:
+        count = await session.scalar(select(func.count(User.id)).where(
+            User.role == Role.ADMIN.value, User.status == AccountStatus.ACTIVE.value, User.is_active.is_(True)))
+        if (count or 0) <= 1:
+            raise InvalidStateTransition('Cannot suspend the last active Super Admin.')
+    previous = target.status
+    target.status = AccountStatus.SUSPENDED.value
+    target.is_active = False
+    target.session_version += 1
+    await session.execute(RefreshToken.__table__.update().where(RefreshToken.user_id == target.id,
+        RefreshToken.revoked_at.is_(None)).values(revoked_at=auth_service.utcnow()))
+    await record(session, actor.id, 'user', target.id, 'USER_SUSPENDED', '',
+        {'status': [previous, target.status]})
+    return target
+
+
 async def unlock_user(session: AsyncSession, user_id: int, actor: User) -> User:
     target = await session.get(User, user_id)
     if not target: raise NotFound('User not found.')
@@ -119,25 +159,62 @@ async def unlock_user(session: AsyncSession, user_id: int, actor: User) -> User:
     return target
 
 
-async def approve_registration(session: AsyncSession, user_id: int, approved: bool,
-                               reason: str | None, actor: User) -> User:
-    target = await session.get(User, user_id)
-    if not target or target.role != Role.INSTITUTION.value or target.status != AccountStatus.PENDING_APPROVAL.value:
-        raise NotFound('Pending institution registration not found.')
-    institution = await session.get(Institution, target.institution_id)
+async def decide_registration(session: AsyncSession, user_id: int, approved: bool,
+                              reason: str | None, actor: User, *, override: bool = False) -> User:
+    target = await session.scalar(select(User).where(User.id == user_id).with_for_update())
+    if not target or target.role not in {Role.INSTITUTION.value, Role.AICTE_OFFICIAL.value}:
+        raise NotFound('Registration application not found.')
+    if target.role == Role.AICTE_OFFICIAL.value and actor.role != Role.ADMIN.value:
+        raise PermissionDenied('Only a Super Admin may review AICTE Official applications.')
+    if target.role == Role.INSTITUTION.value and actor.role not in {Role.ADMIN.value, Role.AICTE_OFFICIAL.value}:
+        raise PermissionDenied('Only an AICTE Official or Super Admin may review Institution applications.')
+    previous_status = target.status
+    if override:
+        if actor.role != Role.ADMIN.value:
+            raise PermissionDenied('Only a Super Admin may override an application decision.')
+        if target.role not in {Role.INSTITUTION.value, Role.AICTE_OFFICIAL.value}:
+            raise InvalidStateTransition('Only public applications can be overridden.')
+        if target.created_by is not None or target.email_verified_at is None:
+            raise InvalidStateTransition('Only a verified public application may be overridden.')
+        if target.status not in {AccountStatus.ACTIVE.value, AccountStatus.REJECTED.value, AccountStatus.DISABLED.value,
+                                 AccountStatus.PENDING_APPROVAL.value}:
+            raise InvalidStateTransition('Only a previously reviewed application can be overridden.')
+    elif target.status != AccountStatus.PENDING_APPROVAL.value:
+        raise NotFound('Pending registration not found.')
+
+    institution = await session.get(Institution, target.institution_id) if target.role == Role.INSTITUTION.value else None
+    if target.role == Role.INSTITUTION.value and not institution:
+        raise NotFound('Institution registration record not found.')
     if approved:
         target.status = AccountStatus.ACTIVE.value
         target.is_active = True
-        institution.status = 'active'
-        await send_email(target.email, 'FDR-Shield account approved', '<p>Your account is approved. You may now sign in.</p>')
+        if institution:
+            institution.status = 'active'
+        if previous_status != AccountStatus.ACTIVE.value:
+            target.session_version += 1
+        await send_email(target.email, 'FDR-Shield account approved',
+            '<p>Your application is approved. You may now sign in.</p>')
     else:
-        target.status = AccountStatus.DISABLED.value
+        target.status = AccountStatus.REJECTED.value
         target.is_active = False
         if institution: institution.status = 'rejected'
-        await send_email(target.email, 'FDR-Shield registration update', f'<p>Your registration was not approved. Reason: {reason or "Not specified"}</p>')
-    await record(session, actor.id, 'user', target.id, 'REGISTRATION_APPROVED' if approved else 'REGISTRATION_REJECTED', '',
-        {'status': [AccountStatus.PENDING_APPROVAL.value, target.status], 'reason': [None, reason]})
+        target.session_version += 1
+        await session.execute(RefreshToken.__table__.update().where(RefreshToken.user_id == target.id,
+            RefreshToken.revoked_at.is_(None)).values(revoked_at=auth_service.utcnow()))
+        await send_email(target.email, 'FDR-Shield registration update',
+            f'<p>Your registration was not approved. Reason: {reason or "Not specified"}</p>')
+    action = ('REGISTRATION_DECISION_OVERRIDDEN' if override else
+              'REGISTRATION_APPROVED' if approved else 'REGISTRATION_REJECTED')
+    await record(session, actor.id, 'user', target.id, action, '',
+        {'status': [previous_status, target.status], 'decision': [None, 'approve' if approved else 'reject'],
+         'reason': [None, reason], 'role': [target.role, target.role]})
     return target
+
+
+async def approve_registration(session: AsyncSession, user_id: int, approved: bool,
+                               reason: str | None, actor: User) -> User:
+    """Compatibility wrapper for existing admin Institution-registration endpoints."""
+    return await decide_registration(session, user_id, approved, reason, actor)
 
 
 async def reset_user_password(session: AsyncSession, user_id: int, actor: User) -> None:

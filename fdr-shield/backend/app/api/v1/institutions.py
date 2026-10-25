@@ -6,8 +6,10 @@ from app.core.database import get_session
 from app.core.deps import get_current_user, require_roles, pagination, Pagination, get_client_ip
 from app.core.enums import Role
 from app.schemas.institution import AssistantMessageRequest, AssistantMessageResponse, InstitutionCreate
+from app.schemas.auth import AdminUserOut, RegistrationDecisionRequest
 from app.services import institution_service
 from app.services import institution_assistant_service
+from app.services import user_admin_service
 
 router = APIRouter()
 
@@ -61,6 +63,19 @@ async def institution_ml_recommendations(fdr_id: int | None = None,
         raise HTTPException(404, 'Institution not found')
     from app.services.ml_service import institution_recommendations
     return await institution_recommendations(session, user.institution_id, fdr_id)
+
+
+@router.get('/registrations', response_model=list[AdminUserOut])
+async def pending_institution_registrations(page: Pagination = Depends(pagination),
+        session: AsyncSession = Depends(get_session), actor=Depends(require_roles(Role.AICTE_OFFICIAL))):
+    return await user_admin_service.list_pending_registrations(session, Role.INSTITUTION.value, page)
+
+
+@router.post('/registrations/{user_id}/decision', response_model=AdminUserOut)
+async def decide_institution_registration(user_id: int, body: RegistrationDecisionRequest,
+        session: AsyncSession = Depends(get_session), actor=Depends(require_roles(Role.AICTE_OFFICIAL))):
+    return await user_admin_service.decide_registration(session, user_id,
+        body.decision == 'approve', body.reason, actor)
 
 
 @router.get("/{institution_id}")

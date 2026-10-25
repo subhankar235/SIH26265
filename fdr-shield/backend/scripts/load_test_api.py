@@ -16,7 +16,6 @@ import httpx
 
 API_BASE = os.getenv('LOAD_TEST_API_BASE', 'http://127.0.0.1:8000/api/v1').rstrip('/')
 API_ROOT = API_BASE[:-len('/api/v1')] if API_BASE.endswith('/api/v1') else API_BASE
-PORTAL = os.getenv('LOAD_TEST_PORTAL', 'admin')
 EMAIL = os.getenv('LOAD_TEST_EMAIL', '')
 PASSWORD = os.getenv('LOAD_TEST_PASSWORD', '')
 USERS = int(os.getenv('LOAD_TEST_USERS', '100'))
@@ -48,7 +47,7 @@ async def main() -> None:
     limits = httpx.Limits(max_connections=USERS, max_keepalive_connections=USERS)
     timeout = httpx.Timeout(20.0, connect=5.0)
     async with httpx.AsyncClient(base_url=API_BASE, limits=limits, timeout=timeout) as client:
-        response = await client.post(f'/auth/login/{PORTAL}', json={'email': EMAIL, 'password': PASSWORD})
+        response = await client.post('/auth/login', json={'email': EMAIL, 'password': PASSWORD})
         if response.status_code != 200 or response.json().get('mfa_required'):
             raise SystemExit(f'Load-test login failed with HTTP {response.status_code}; no load was sent.')
 

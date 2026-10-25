@@ -14,7 +14,7 @@ export default function AdminInstitutions() {
     try { await create.mutateAsync(body); form.reset(); }
     catch (x) { setError(x.response?.data?.detail || 'Could not create institution or invitation.'); }
   }
-  return <section><p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">Admin portal</p><h1 className="mb-2 mt-1 text-3xl font-bold">Institution records</h1><p className="mb-6 text-slate-600">Creating an institution also emails a one-time invitation to its initial account holder.</p>
+  return <section><p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">Super Admin portal</p><h1 className="mb-2 mt-1 text-3xl font-bold">Institution records</h1><p className="mb-6 text-slate-600">Creating an institution also emails a one-time invitation to its initial account holder.</p>
     <form onSubmit={submit} className="mb-6 grid gap-3 rounded-xl border bg-white p-5 sm:grid-cols-2">
       { [['aicte_id','AICTE institution ID'],['name','Institution name'],['state','State'],['head_name','Contact person'],['contact_email','Contact email'],['contact_phone','Contact phone']].map(([name,label])=><label className="text-sm" key={name}>{label}<input name={name} type={name==='contact_email'?'email':'text'} required className="mt-1 w-full rounded border p-2.5"/></label>)}
       {error&&<p role="alert" className="text-red-700 sm:col-span-2">{error}</p>}

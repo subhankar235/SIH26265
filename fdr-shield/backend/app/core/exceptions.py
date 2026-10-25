@@ -7,6 +7,9 @@ from fastapi.exceptions import RequestValidationError
 class AuthError(Exception): ...
 
 
+class AccountStatusError(Exception): ...
+
+
 class RateLimitError(Exception): ...
 
 
@@ -38,6 +41,12 @@ def register_exception_handlers(app: FastAPI) -> None:
             return JSONResponse(status_code=code,content={'error':error.__name__,'detail':str(exc),
                 'request_id':getattr(request.state,'request_id',None)})
         app.add_exception_handler(error,handler)
+
+    async def account_status_handler(request, exc: AccountStatusError):
+        return JSONResponse(status_code=403, content={'error': {
+            'code': 'ACCOUNT_STATUS', 'message': str(exc),
+            'request_id': getattr(request.state, 'request_id', None)}})
+    app.add_exception_handler(AccountStatusError, account_status_handler)
 
     async def http_error_handler(request, exc: HTTPException):
         codes={401:'UNAUTHENTICATED',403:'FORBIDDEN',404:'NOT_FOUND',409:'ILLEGAL_TRANSITION',
