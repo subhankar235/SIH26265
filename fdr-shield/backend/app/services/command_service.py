@@ -125,14 +125,15 @@ def _parse_offline(text: str) -> dict:
     raise InvalidStateTransition('This command is not in the supported allowlist. No action was performed.')
 
 
-async def _interpret_text(text: str) -> CommandIntentModel:
+async def _interpret_text(text: str) -> tuple[CommandIntentModel, str]:
     """LLM or deterministic JSON intent parser with strict schema and prompt-injection guardrails."""
     settings = get_settings()
     if not settings.command_llm_enabled:
-        return CommandIntentModel.model_validate(_parse_offline(text))
+        return CommandIntentModel.model_validate(_parse_offline(text)), 'deterministic-allowlist-v1'
 
     if not settings.command_llm_api_url or not settings.command_llm_model:
-        raise InvalidStateTransition('Command LLM is enabled but URL/model configuration is missing.')
+        logger.info('Command LLM is enabled but not configured; using deterministic interpreter.')
+        return CommandIntentModel.model_validate(_parse_offline(text)), 'deterministic-allowlist-v1'
 
     headers = {'Content-Type': 'application/json'}
     if settings.command_llm_api_key:
@@ -168,13 +169,11 @@ async def _interpret_text(text: str) -> CommandIntentModel:
         content = response.json()['choices'][0]['message']['content']
         parsed = CommandIntentModel.model_validate_json(content)
         if parsed.confidence < 0.60:
-            raise InvalidStateTransition('Command intent is ambiguous; rephrase the request.')
-        return parsed
-    except InvalidStateTransition:
-        raise
+            raise ValueError('LLM intent confidence is below the acceptance threshold.')
+        return parsed, 'llm-structured'
     except Exception as exc:
         logger.warning('LLM interpretation failed safely; falling back to offline parser: %s', exc)
-        return CommandIntentModel.model_validate(_parse_offline(text))
+        return CommandIntentModel.model_validate(_parse_offline(text)), 'deterministic-allowlist-v1'
 
 
 async def _validate_state_snapshot(session: AsyncSession, actor: User, plan: dict) -> None:
@@ -203,7 +202,8 @@ async def interpret(session: AsyncSession, actor: User, text: str, idempotency_k
         return existing, existing.interpreted_plan or {}
 
     # Step 9.1: LLM intent parse (JSON schema)
-    parsed = (await _interpret_text(text)).model_dump()
+    parsed_model, interpreter = await _interpret_text(text)
+    parsed = parsed_model.model_dump()
     intent_raw = parsed['intent']
     canonical_intent = intent_raw.lower()
     tool_name = INTENT_TO_TOOL.get(canonical_intent) or INTENT_TO_TOOL.get(intent_raw)
@@ -242,7 +242,7 @@ async def interpret(session: AsyncSession, actor: User, text: str, idempotency_k
     }]
 
     plan = {
-        'interpreter': 'llm-structured' if get_settings().command_llm_enabled else 'deterministic-allowlist-v1',
+        'interpreter': interpreter,
         'confidence': parsed.get('confidence', 1.0),
         'intent': canonical_intent,
         'tool': tool_name,

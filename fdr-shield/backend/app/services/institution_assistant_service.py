@@ -25,6 +25,7 @@ from app.models.discrepancy import Discrepancy
 from app.models.fdr import FDR
 from app.models.workflow import CorrectionRequest, VerificationRun, WorkflowInstance, WorkflowNodeExecution
 from app.core.clock import business_today
+from app.services.llm_service import generate_grounded_reply
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +417,18 @@ async def process_institution_message(session: AsyncSession, actor_user, message
             "and guide you through renewal and release requirements. How can I assist with your FDRs today?"
         )
 
-    # Apply guardrails
-    sanitized_reply = enforce_guardrails(reply)
+    # Ask the configured LLM to phrase a grounded answer from server-derived tool
+    # results. If the provider is unavailable, keep the deterministic reply.
+    if get_settings().command_llm_enabled:
+        try:
+            sanitized_reply = await generate_grounded_reply(raw, tool_used, res if 'res' in locals() else reqs, reply)
+        except Exception:
+            sanitized_reply = reply
+    else:
+        sanitized_reply = reply
+
+    # Apply guardrails to both generated and deterministic replies.
+    sanitized_reply = enforce_guardrails(sanitized_reply)
 
     return {
         'reply': sanitized_reply,

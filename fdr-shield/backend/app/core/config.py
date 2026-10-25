@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     smtp_host: str = 'localhost'
     smtp_port: int = 1025
     telegram_bot_token: str = ''
-    ocr_engine: str = 'ollama_vision'
-    ollama_base_url: str = 'http://host.docker.internal:11434'
-    ollama_model: str = 'gemma4:cloud'
+    ocr_engine: str = 'disabled'
+    ollama_base_url: str = ''
+    ollama_model: str = ''
     ollama_api_key: str = ''
     ollama_timeout: float = 120
     storage_backend: str = 'minio'

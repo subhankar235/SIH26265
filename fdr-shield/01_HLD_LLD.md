@@ -1,7 +1,7 @@
 # FDR-Shield: HLD & LLD
 
 AI-powered centralized Security Deposit & FDR management portal for AICTE.
-Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), pluggable OCR with Ollama vision as the default, **demo bank gateway**. The default installation has no torch/GPU/ML dependencies. Optional EasyOCR/Tesseract adapters are selected explicitly.
+Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), optional OCR/LLM providers, **demo bank gateway**. OCR and Command Center LLM are disabled by default; without providers, manual field entry and deterministic assistant/ML fallbacks remain available. The default installation has no torch/GPU/ML dependencies.
 
 ---
 
@@ -19,7 +19,8 @@ Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), plugg
 ### 1.2 Free / demo replacements for paid services
 | Blueprint item | We use | Note |
 |---|---|---|
-| AWS Textract / Google Vision | **Ollama vision API** (`gemma4:cloud` default) | Local Ollama sign-in or Ollama API key; mocked in tests |
+| AWS Textract / Google Vision | Optional `ollama_vision` OCR adapter | Disabled by default; explicitly configure an Ollama endpoint/model when available; failures preserve unverified records and allow manual field entry |
+| LLM agent provider | Optional OpenAI-compatible endpoint | Disabled by default; configure `COMMAND_LLM_*` when a provider is available; deterministic command and assistant fallbacks remain active |
 | Optional offline OCR | EasyOCR or Tesseract adapters | Install `requirements-ml.txt` explicitly; neither is in Docker/default requirements |
 | AWS S3 | **MinIO** | S3 compatible via boto3; swap endpoint for prod |
 | Twilio / Gupshup WhatsApp | **Telegram Bot API** + `whatsapp_mock` outbox | WhatsApp is demoed via a mock adapter |
@@ -166,9 +167,10 @@ Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discre
 | POST/GET `/refunds`, POST `/refunds/{id}/decision` | institution / AICTE Official | Release workflow |
 | GET `/dashboard/bureau`, `/dashboard/institution` | AICTE Official / admin; institution | Stats |
 | GET `/audit` | AICTE Official, admin | Audit trail |
-| POST `/institution/assistant/messages` | institution | Institution-scoped assistance; context is derived server-side |
+| POST `/institution/assistant/messages` | institution | Institution-scoped assistance; server tools derive context, configured LLM phrases grounded answer |
 | GET `/admin/operations/health`, `/failed-jobs`, `/stuck-cases`, `/delivery-failures`, `/recovery-recommendations` | admin | Read-only deterministic operations monitoring |
 | POST `/admin/operations/actions/{requeue-failed-job|send-test-alert}` | admin | Confirmed, allowlisted operational actions only |
+| POST `/commands/interpret` | AICTE Official / admin | LLM structured intent to allowlisted tools; plan still requires authorization and confirmation |
 | GET/POST `/admin/rules`, POST `/admin/rules/{id}/versions` | admin | Append-only automation policy versions with audit records |
 | GET `/institution/ml/recommendations` | institution | Own-case deterministic review suggestions only |
 | GET `/workflows/recommendations` | AICTE Official | Rule-based priority suggestions only |
@@ -198,7 +200,7 @@ elif bank.found and bank.status == ACTIVE -> 🟢 BANK_VERIFIED (FDR status VERI
 else                                      -> 🟡 SELF_DECLARED
 ```
 
-**OCR extraction**: `FdrExtractor.extract(pages)` returns six fields (`fdr_number`, `bank_name`, `holder_name`, `amount`, `issue_date`, `maturity_date`); missing values are null. The Ollama adapter sends at most two JPEG pages resized to 1600 px, requests constrained JSON at temperature 0, and retries once on invalid JSON. Dates normalize to ISO-8601; confidence is the populated-field fraction. Errors return an empty result, preserving SUBMITTED/yellow state.
+**OCR extraction**: `FdrExtractor.extract(pages)` returns six fields (`fdr_number`, `bank_name`, `holder_name`, `amount`, `issue_date`, `maturity_date`); missing values are null. `OCR_ENGINE=disabled` is the default and returns empty fields for manual entry without network calls. The optional Ollama adapter sends at most two JPEG pages resized to 1600 px, requests constrained JSON at temperature 0, and retries once on invalid JSON. Dates normalize to ISO-8601; confidence is the populated-field fraction. Provider errors return an empty result, preserving SUBMITTED/yellow state.
 
 **Adding a CNN OCR adapter**: implement the `FdrExtractor` protocol in `app/integrations/ocr/cnn_engine.py`, keep all model/runtime dependencies optional, add a selector branch to `get_engine()`, and add mocked adapter contract tests. Do not add the heavy runtime to the default Docker build.
 
@@ -215,6 +217,12 @@ Every service mutation calls `audit_service.record(session, user_id, entity, ent
 - Admin may create labeled synthetic demo features in `ml_demo_samples`; all are `is_synthetic=true`, excluded from gate counts/hashes and shown with a synthetic banner. Registry demo versions state `DEMO_ONLY_NOT_TRAINED`; no synthetic model metrics are reported.
 - “Eligible for training review” is not approval and never launches training. All current recommendations use deterministic fallbacks, are stored as advisory predictions, and never affect workflow state, trust, permissions, approvals, rejection, or release.
 - Registrations capture the fixed seed, feature version, dataset hash, runtime-library manifest, acceptance criteria and real/synthetic row counts. There is no trained DAGMM, DeepHit or BOCPD version until a separate trainer meets its stated acceptance criteria.
+- No ML inference provider is currently installed. Every use case remains on its named deterministic fallback; Gate 0 only measures data readiness and cannot activate model behavior.
+
+### 2.4.2a Optional LLM agents and fallback
+- `COMMAND_LLM_ENABLED=false` by default. When explicitly configured, the Command Center uses strict structured output and the institution assistant uses server-scoped tool results as grounded context.
+- Missing endpoint/model, low-confidence or malformed model output, timeout, and provider errors use the deterministic command parser or existing assistant response. Unsupported requests remain refused. Plans still pass server-side allowlists, RBAC, entity resolution, drift checks and confirmation.
+- Prompts/data are not logged. Frontend has no provider key; credentials stay in backend environment variables.
 
 ### 2.4.3 Phase 14 reliability and security controls
 - Audit rows are SHA-256 chained over canonical record fields with a transaction-locked chain head. ORM guards and database UPDATE/DELETE triggers enforce append-only records; admin APIs verify and export the chain, and Celery writes a verified weekly export to configured private storage.
