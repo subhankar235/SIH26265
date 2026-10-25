@@ -5,3 +5,5 @@ __pycache__/
 dist/
 .venv/
 .env.example
+.env.example
+frontend\.env.example
