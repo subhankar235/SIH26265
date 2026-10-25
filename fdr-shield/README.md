@@ -1,6 +1,6 @@
 # FDR-Shield
 
-AICTE security deposit and fixed deposit receipt (FDR) management demo. It uses FastAPI, async SQLAlchemy, PostgreSQL, Redis/Celery, MinIO, a React/Vite portal, optional OCR/LLM providers, and a seeded demo bank gateway. The gateway is mock-only; no real bank systems are called. OCR and Command Center LLM are disabled by default, so startup requires no Ollama/cloud account/API key. Manual FDR entry and deterministic command/assistant/ML fallbacks remain available.
+AICTE security deposit and fixed deposit receipt (FDR) management demo. It uses FastAPI, async SQLAlchemy, PostgreSQL, Redis/Celery, MinIO, a React/Vite portal, optional Ollama Cloud OCR and a separately configurable LLM API for agents, plus a seeded demo bank gateway. The gateway is mock-only; no real bank systems are called. If a provider is unavailable or its key is absent, manual FDR entry and deterministic command/assistant/ML fallbacks remain available.
 
 ## Run with Docker Compose
 
@@ -16,7 +16,7 @@ docker compose exec backend python -m scripts.demo_flow
 
 Open the frontend at http://localhost:5173, API docs at http://localhost:8000/docs, MinIO console at http://localhost:9001, Mailhog at http://localhost:8025, and the mock bank docs at http://localhost:9100/docs. Compose exposes its PostgreSQL service on host port 5434 by default (`POSTGRES_HOST_PORT` overrides it) to avoid colliding with a host database. Containers connect over Compose DNS at `postgres:5432`. The development seed includes synthetic demo data/accounts; production bootstrapping must use the one-time Admin CLI and account invitations.
 
-The checked-in `backend/.env.example` contains development-only compose values. Demo seeding is blocked outside dev/test. For a non-demo database, migrate first, configure unique secrets, then run `python -m scripts.create_admin` once with `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`; remove that password from the environment afterward. Production requires `APP_ENV=prod`, `COOKIE_SECURE=true`, a valid `MFA_ENCRYPTION_KEY`, `FRONTEND_ORIGIN`, and matching `CORS_ORIGINS` behind HTTPS. The bootstrap Admin must change the initial password.
+The checked-in `backend/.env.example` contains development-only Compose values and no API keys. `OLLAMA_API_KEY` is only for Ollama OCR. The agent LLM has its own `COMMAND_LLM_API_URL`, `COMMAND_LLM_MODEL`, and `COMMAND_LLM_API_KEY`; it is disabled until you select/configure an LLM provider. Compose loads ignored `backend/.env` values as overrides. `S3_ENDPOINT` is the container-to-container storage address (`http://minio:9000`); `S3_PUBLIC_ENDPOINT` is used only to sign browser-readable links (`http://localhost:9000` in local Compose). Set the latter to the browser-reachable MinIO URL in other deployments. Never put keys in frontend variables or commit them. Demo seeding is blocked outside dev/test. For a non-demo database, migrate first, configure unique secrets, then run `python -m scripts.create_admin` once with `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`; remove that password from the environment afterward. Production requires `APP_ENV=prod`, `COOKIE_SECURE=true`, a valid `MFA_ENCRYPTION_KEY`, `FRONTEND_ORIGIN`, and matching `CORS_ORIGINS` behind HTTPS. The bootstrap Admin must change the initial password.
 
 After migrating an existing database, run the idempotent `backfill_workflows` script before relying on the new status projections. It imports a current-state snapshot only; legacy node-level run history cannot be reconstructed. New submissions enter a PostgreSQL-backed workflow via a transactional outbox; Celery executes extraction, validation and routing nodes, records checkpoints/errors, retries transient failures, waits for corrections/official review, and reclaims expired worker leases. Reminder/correction email delivery uses the outbox; ambiguous SMTP sends after a dispatcher crash are marked uncertain/dead rather than blindly resent. Workflow inspection/replay, SSE, Command Center, scoped assistance/operations agents and role-based screens are implemented in the current React app.
 
@@ -24,9 +24,11 @@ After migrating an existing database, run the idempotent `backfill_workflows` sc
 
 See [`docs/phase15-17-verification.md`](docs/phase15-17-verification.md) for test coverage, injection procedures, deployment/rollback steps, acceptance target status and the Phase 17 demo scope. Current local checks are `python -m pytest -q` from `backend`, plus `npm test` and `npm run build` from `frontend`. There is no configured frontend lint script. ML Gate 0 is available from Admin → ML governance / `/admin/ml`; models are not trained until real historical data volume and review criteria qualify. Seeded rows and generated examples are marked synthetic and excluded from real aggregate metrics.
 
+To run a read-only authenticated concurrency check against a running API, set `LOAD_TEST_EMAIL` and `LOAD_TEST_PASSWORD` in the backend shell and run `python -m scripts.load_test_api`. Defaults are 100 concurrent readers and 5 rounds; set `LOAD_TEST_USERS` / `LOAD_TEST_ROUNDS` to adjust. It reports per-route p50/p95/p99 latency and errors without printing credentials or mutating records.
+
 ### Optional LLM agents
 
-The Command Center and institution assistant do not contact an LLM by default. If you later choose a provider, set `COMMAND_LLM_ENABLED=true`, `COMMAND_LLM_API_URL`, and `COMMAND_LLM_MODEL` in the backend environment; set `COMMAND_LLM_API_KEY` only if your chosen provider requires it. Keep these credentials out of frontend `VITE_*` variables. If the provider is missing, unavailable, times out, or returns invalid output, command and assistant responses fall back to deterministic behavior. Mutating actions always require server authorization and confirmation.
+The agent LLM is disabled by default. To enable it, set `COMMAND_LLM_ENABLED=true` and configure the chosen provider’s `COMMAND_LLM_API_URL`, `COMMAND_LLM_MODEL`, and (if required) `COMMAND_LLM_API_KEY`. These are separate from Ollama OCR settings. Keep credentials out of frontend `VITE_*` variables. If a provider is missing, unavailable, times out, or returns invalid output, commands and assistant responses fall back to deterministic behavior. Mutating actions always require server authorization and confirmation.
 
 Authentication uses separate portals at `/institution/login`, `/official/login`, and `/admin/login`. Access and rotating refresh tokens are HttpOnly cookies; browser state stores only the user profile. Unsafe cookie-authenticated calls use a signed double-submit CSRF token. Institution users can self-register, verify email, and then wait for Admin approval. Admin-created users receive a one-time invite to set a password. In local Compose, invitation, verification and reset emails can be inspected in Mailhog.
 
@@ -34,7 +36,7 @@ The Official portal now includes a persisted workflow control room, exception in
 
 ### Optional OCR
 
-`OCR_ENGINE=disabled` is the default. Upload/review still works, but extracted fields are blank and must be entered/confirmed manually. This mode makes no model call. To use OCR later, choose an available provider explicitly (`ollama_vision`, `easyocr`, or `tesseract`) and configure/install its requirements. If OCR fails, the record remains unverified with no extracted values; it is not treated as a verification failure or authenticity finding.
+Compose sets `OCR_ENGINE=ollama_vision`, `OLLAMA_BASE_URL=https://ollama.com`, and `OLLAMA_MODEL=gemma4:cloud`. Set `OLLAMA_API_KEY` in `backend/.env` for OCR only. Without a working provider/key, OCR safely returns empty fields; enter/review them manually and the record remains unverified. To use offline OCR instead, choose `easyocr` or `tesseract` and install its requirements.
 
 ## Demo accounts
 
@@ -50,13 +52,13 @@ The Official portal now includes a persisted workflow control room, exception in
 ## Four-step demo
 
 1. Sign in with `institution1@example.test` and upload a scan. Seed creates 15 sample records and three scans in `backend/sample_scans` (matching SBI/PNB, plus a deliberately mismatched HDFC sample).
-2. Enter/review the FDR fields manually (OCR is disabled by default); verification compares the declared values against the mock bank and updates the trust badge.
+2. Upload a scan; when Ollama Cloud is configured OCR extracts fields, otherwise enter/review fields manually. Verification compares declared values against the mock bank and updates the trust badge.
 3. Sign in as `officer@example.test`, inspect the SplitViewer and approve/reject; use `admin@example.test` to fire `POST /api/v1/notifications/test?fdr_id=<id>&stage=T-90` and check Mailhog at http://localhost:8025.
 4. Use a matured, verified FDR to request a refund, then sign in as either AICTE Official account to approve/reject. Audit entries are visible in the Bureau portal.
 
 ## No-Docker Windows demo
 
-Install Python 3.11+ and Node.js 20+. PostgreSQL/Redis are optional for the demo (SQLite + Celery eager mode are supported). No Ollama or LLM API key is required in the default configuration. From `backend`, create a virtual environment and install `requirements.txt`. Set these environment variables in the backend PowerShell session:
+Install Python 3.11+ and Node.js 20+. PostgreSQL/Redis are optional for the demo (SQLite + Celery eager mode are supported). Ollama Cloud is optional for OCR; the separate agent LLM provider is also optional. From `backend`, create a virtual environment and install `requirements.txt`. Set these environment variables in the backend PowerShell session:
 
 ```powershell
 $env:DATABASE_URL='sqlite+aiosqlite:///./fdrshield.db'
@@ -67,7 +69,7 @@ $env:MOCK_BANK_URL='http://127.0.0.1:9100'
 $env:SMTP_HOST='127.0.0.1'
 ```
 
-Run `python -m scripts.seed`, then start the mock bank with `uvicorn mock_bank_api.main:app --port 9100` and the API with `uvicorn app.main:app --reload --port 8000` (separate terminals; keep the SQLite/storage variables set in the API terminal). `frontend/vite.config.js` defaults its API proxy to `http://localhost:8000`; set `VITE_API_PROXY_TARGET` if the API uses another local address. The local storage adapter uses expiring signed links. With OCR disabled, fields are filled manually. Mailhog is optional: alerts are recorded even if SMTP is unavailable. For Mailhog outside Docker, set `SMTP_HOST`/`SMTP_PORT` to a local SMTP relay. In another terminal run `cd frontend; npm install; npm run dev`.
+Run `python -m scripts.seed`, then start the mock bank with `uvicorn mock_bank_api.main:app --port 9100` and the API with `uvicorn app.main:app --reload --port 8000` (separate terminals; keep the SQLite/storage variables set in the API terminal). `frontend/vite.config.js` defaults its API proxy to `http://localhost:8000`; set `VITE_API_PROXY_TARGET` if the API uses another local address. The local storage adapter uses expiring signed links. Without a working OCR key/provider, fields are filled manually; agent LLM remains on deterministic fallback until separately configured. Mailhog is optional: alerts are recorded even if SMTP is unavailable. For Mailhog outside Docker, set `SMTP_HOST`/`SMTP_PORT` to a local SMTP relay. In another terminal run `cd frontend; npm install; npm run dev`.
 
 The automated live sequence is available after seeding: `docker compose exec backend python -m scripts.demo_flow`. It uploads the generated SBI scan, waits for the verification report, exercises officer approval, sends a T-90 test alert, checks Mailhog, and completes a refund decision. The corresponding pytest integration test is opt-in with `FDR_INTEGRATION_URL=http://localhost:8000`.
 

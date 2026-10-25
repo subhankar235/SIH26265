@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     mfa_encryption_key: str = ''
     frontend_origin: str = 'http://localhost:5173'
     s3_endpoint: str = 'http://localhost:9000'
+    s3_public_endpoint: str = ''
     s3_access_key: str = 'minioadmin'
     s3_secret_key: str = 'minioadmin'
     s3_bucket: str = 'fdr-documents'

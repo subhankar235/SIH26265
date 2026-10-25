@@ -69,3 +69,50 @@ def test_local_storage_rejects_tampered_signed_url(tmp_path, monkeypatch):
                              s3_endpoint='', s3_access_key='', s3_secret_key='', s3_bucket='unused')
     monkeypatch.setattr(storage_client, 'get_settings', lambda: config)
     with pytest.raises(ValueError): storage_client.read_local_token('invalid.token.signature')
+
+
+def test_s3_presigned_url_uses_browser_reachable_endpoint(monkeypatch):
+    config = SimpleNamespace(storage_backend='minio', s3_endpoint='http://minio:9000',
+        s3_public_endpoint='http://localhost:9000', s3_access_key='access',
+        s3_secret_key='secret', s3_bucket='fdr-documents')
+    endpoints = []
+
+    class FakeS3:
+        def generate_presigned_url(self, operation, Params, ExpiresIn):
+            assert operation == 'get_object'
+            assert Params == {'Bucket': 'fdr-documents', 'Key': '1/fdr_scan/receipt.png'}
+            assert ExpiresIn == 300
+            return f'{endpoints[-1]}/fdr-documents/1/fdr_scan/receipt.png?signature=test'
+
+    def fake_boto_client(service, **kwargs):
+        assert service == 's3'
+        endpoints.append(kwargs['endpoint_url'])
+        return FakeS3()
+
+    monkeypatch.setattr(storage_client, 'get_settings', lambda: config)
+    monkeypatch.setattr(storage_client.boto3, 'client', fake_boto_client)
+    url = storage_client.presign('1/fdr_scan/receipt.png')
+    assert endpoints == ['http://localhost:9000']
+    assert url.startswith('http://localhost:9000/')
+
+
+def test_dashboard_redis_cache_uses_bounded_timeouts_and_closes_client(monkeypatch):
+    import redis
+    from app.services import dashboard_service
+
+    seen = {}
+
+    class FakeRedis:
+        def get(self, key): return None
+        def close(self): seen['closed'] = True
+
+    def fake_from_url(cls, url, **kwargs):
+        seen.update(kwargs)
+        return FakeRedis()
+
+    monkeypatch.setattr(redis.Redis, 'from_url', classmethod(fake_from_url))
+    assert asyncio.run(dashboard_service._cache_get('dashboard:test')) is None
+    assert seen['socket_connect_timeout'] <= 0.25
+    assert seen['socket_timeout'] <= 0.25
+    assert seen['retry_on_timeout'] is False
+    assert seen['closed'] is True

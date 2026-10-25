@@ -1,7 +1,7 @@
 # FDR-Shield: HLD & LLD
 
 AI-powered centralized Security Deposit & FDR management portal for AICTE.
-Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), optional OCR/LLM providers, **demo bank gateway**. OCR and Command Center LLM are disabled by default; without providers, manual field entry and deterministic assistant/ML fallbacks remain available. The default installation has no torch/GPU/ML dependencies.
+Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), optional OCR/LLM providers, **demo bank gateway**. The Compose example configures Ollama Cloud for OCR; the separate agent LLM provider is disabled until configured. Without usable provider credentials, manual field entry and deterministic assistant/ML fallbacks remain available. The default installation has no torch/GPU/ML dependencies.
 
 ---
 
@@ -19,8 +19,8 @@ Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), optio
 ### 1.2 Free / demo replacements for paid services
 | Blueprint item | We use | Note |
 |---|---|---|
-| AWS Textract / Google Vision | Optional `ollama_vision` OCR adapter | Disabled by default; explicitly configure an Ollama endpoint/model when available; failures preserve unverified records and allow manual field entry |
-| LLM agent provider | Optional OpenAI-compatible endpoint | Disabled by default; configure `COMMAND_LLM_*` when a provider is available; deterministic command and assistant fallbacks remain active |
+| AWS Textract / Google Vision | `ollama_vision` OCR adapter | Compose uses Ollama Cloud `https://ollama.com`; `OLLAMA_API_KEY` is required for cloud use; failures preserve unverified records and allow manual field entry |
+| LLM agent provider | Separately configurable OpenAI-compatible endpoint | Disabled by default; uses only `COMMAND_LLM_API_URL`, `COMMAND_LLM_MODEL`, and `COMMAND_LLM_API_KEY`; deterministic command and assistant fallbacks remain active on provider failure |
 | Optional offline OCR | EasyOCR or Tesseract adapters | Install `requirements-ml.txt` explicitly; neither is in Docker/default requirements |
 | AWS S3 | **MinIO** | S3 compatible via boto3; swap endpoint for prod |
 | Twilio / Gupshup WhatsApp | **Telegram Bot API** + `whatsapp_mock` outbox | WhatsApp is demoed via a mock adapter |
@@ -200,7 +200,7 @@ elif bank.found and bank.status == ACTIVE -> 🟢 BANK_VERIFIED (FDR status VERI
 else                                      -> 🟡 SELF_DECLARED
 ```
 
-**OCR extraction**: `FdrExtractor.extract(pages)` returns six fields (`fdr_number`, `bank_name`, `holder_name`, `amount`, `issue_date`, `maturity_date`); missing values are null. `OCR_ENGINE=disabled` is the default and returns empty fields for manual entry without network calls. The optional Ollama adapter sends at most two JPEG pages resized to 1600 px, requests constrained JSON at temperature 0, and retries once on invalid JSON. Dates normalize to ISO-8601; confidence is the populated-field fraction. Provider errors return an empty result, preserving SUBMITTED/yellow state.
+**OCR extraction**: `FdrExtractor.extract(pages)` returns six fields (`fdr_number`, `bank_name`, `holder_name`, `amount`, `issue_date`, `maturity_date`); missing values are null. Bare Settings default to `OCR_ENGINE=disabled`; Compose selects `ollama_vision` at Ollama Cloud. The adapter sends at most two JPEG pages resized to 1600 px, requests constrained JSON at temperature 0, and retries once on invalid JSON. Dates normalize to ISO-8601; confidence is the populated-field fraction. Provider errors return an empty result, preserving SUBMITTED/yellow state.
 
 **Adding a CNN OCR adapter**: implement the `FdrExtractor` protocol in `app/integrations/ocr/cnn_engine.py`, keep all model/runtime dependencies optional, add a selector branch to `get_engine()`, and add mocked adapter contract tests. Do not add the heavy runtime to the default Docker build.
 
@@ -220,7 +220,7 @@ Every service mutation calls `audit_service.record(session, user_id, entity, ent
 - No ML inference provider is currently installed. Every use case remains on its named deterministic fallback; Gate 0 only measures data readiness and cannot activate model behavior.
 
 ### 2.4.2a Optional LLM agents and fallback
-- `COMMAND_LLM_ENABLED=false` by default. When explicitly configured, the Command Center uses strict structured output and the institution assistant uses server-scoped tool results as grounded context.
+- `COMMAND_LLM_ENABLED=false` by default. When enabled with its own provider URL/model/key, the Command Center uses strict structured output and the institution assistant uses server-scoped tool results as grounded context. `OLLAMA_API_KEY` is reserved for OCR and is never reused for agent LLM calls.
 - Missing endpoint/model, low-confidence or malformed model output, timeout, and provider errors use the deterministic command parser or existing assistant response. Unsupported requests remain refused. Plans still pass server-side allowlists, RBAC, entity resolution, drift checks and confirmation.
 - Prompts/data are not logged. Frontend has no provider key; credentials stay in backend environment variables.
 

@@ -43,7 +43,11 @@ services:
     volumes: ["./backend/mock_bank_api/data:/app/data:ro"]
   backend:
     build: ./backend
-    env_file: ./backend/.env.example
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -55,13 +59,21 @@ services:
   worker:
     build: ./backend
     command: celery -A app.workers.celery_app worker -l info
-    env_file: ./backend/.env.example
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     depends_on: [backend]
     extra_hosts: ["host.docker.internal:host-gateway"]
   beat:
     build: ./backend
     command: celery -A app.workers.celery_app beat -l info
-    env_file: ./backend/.env.example
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     depends_on: [backend]
   frontend:
     build: ./frontend

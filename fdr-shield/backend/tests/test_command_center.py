@@ -78,6 +78,7 @@ def test_command_interpreter_uses_configured_llm_and_parses_structured_intent(mo
         command_llm_enabled=True,
         command_llm_api_url='http://ollama/v1/chat/completions',
         command_llm_api_key='test-token',
+        ollama_api_key='ocr-only-token',
         command_llm_model='qwen2.5:3b',
         command_llm_timeout=3,
     ))
@@ -146,6 +147,7 @@ def test_grounded_assistant_reply_uses_tool_result_with_configured_llm(monkeypat
         command_llm_enabled=True,
         command_llm_api_url='http://ollama/v1/chat/completions',
         command_llm_api_key='test-token',
+        ollama_api_key='ocr-only-token',
         command_llm_model='qwen2.5:3b',
         command_llm_timeout=4,
     ))

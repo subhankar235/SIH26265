@@ -9,6 +9,36 @@ from app.schemas.dashboard import DashboardOut,MetricCards,ChartPoint
 from app.core.clock import business_today
 
 
+def _dashboard_redis_client():
+    from redis import Redis
+    from app.core.config import get_settings
+    return Redis.from_url(
+        get_settings().redis_url,
+        decode_responses=True,
+        socket_connect_timeout=0.25,
+        socket_timeout=0.25,
+        retry_on_timeout=False,
+    )
+
+
+async def _cache_get(key: str):
+    import asyncio
+    client = _dashboard_redis_client()
+    try:
+        return await asyncio.to_thread(client.get, key)
+    finally:
+        await asyncio.to_thread(client.close)
+
+
+async def _cache_setex(key: str, ttl: int, value: str) -> None:
+    import asyncio
+    client = _dashboard_redis_client()
+    try:
+        await asyncio.to_thread(client.setex, key, ttl, value)
+    finally:
+        await asyncio.to_thread(client.close)
+
+
 async def bureau_metrics(session: AsyncSession) -> DashboardOut:
     # SUM active value, count expiring<=30d, pending verifications, open discrepancies; group by bank, month, status; Redis cache 60s
     return await _metrics(session,None)
@@ -19,12 +49,9 @@ async def institution_metrics(session: AsyncSession, institution_id: int) -> Das
     return await _metrics(session,institution_id)
 
 async def _metrics(session,institution_id):
-    import asyncio
-    from redis import Redis
-    from app.core.config import get_settings
     key=f'fdr-dashboard:v2:{institution_id or "bureau"}'
     try:
-        cached=await asyncio.to_thread(Redis.from_url(get_settings().redis_url,decode_responses=True).get,key)
+        cached=await _cache_get(key)
         if cached:return DashboardOut.model_validate_json(cached)
     except Exception:pass
     filters=[FDR.is_synthetic.is_(False)]
@@ -54,6 +81,6 @@ async def _metrics(session,institution_id):
     for maturity in (await session.scalars(maturity_query)).all():
         month=maturity.replace(day=1);months[month]=months.get(month,0)+1
     result=DashboardOut(metrics=metrics,value_by_bank=[ChartPoint(label=k,value=float(v)) for k,v in banks],maturity_timeline=[ChartPoint(label=k.strftime('%b %Y'),value=v) for k,v in sorted(months.items())],status_breakdown=[ChartPoint(label=k,value=int(v)) for k,v in statuses])
-    try:await asyncio.to_thread(Redis.from_url(get_settings().redis_url,decode_responses=True).setex,key,60,result.model_dump_json())
+    try:await _cache_setex(key,60,result.model_dump_json())
     except Exception:pass
     return result
