@@ -28,7 +28,7 @@ fdr-shield/
 │   ├── mock_bank_api/              separate DEMO CBS FastAPI service
 │   ├── migrations/ scripts/ tests/
 └── frontend/
-    └── src/ api/ store/ hooks/ utils/ routes/ components/{layout,common,charts,fdr,refund} pages/{auth,institution,bureau}
+    └── src/ api/ store/ hooks/ utils/ routes/ components/{layout,common,charts,fdr,refund} pages/{auth,institution,bureau,admin}
 ```
 
 ## 2. Backend, file by file
@@ -38,14 +38,16 @@ fdr-shield/
 |---|---|
 | `config.py` | `Settings` from env; `get_settings()` cached |
 | `database.py` | async engine, `Base`, `get_session` dependency |
-| `security.py` | bcrypt, JWT, TOTP helpers |
-| `deps.py` | `get_current_user`, `require_roles`, `pagination`, `get_client_ip` |
+| `security.py` | Argon2id + legacy bcrypt verification, JWT, CSRF, encrypted TOTP helpers |
+| `deps.py` | Cookie-backed `get_current_user`, `require_roles`, pagination, client IP |
 | `middleware.py` | request id + request logging |
 | `exceptions.py` | domain errors -> JSON responses |
 | `enums.py` | Role, FDRStatus, TrustBadge, AlertStage (already complete) |
 
 ### models/ (already real SQLAlchemy columns; add relationships/indexes as needed)
-`user`, `institution`, `fdr`, `document`, `discrepancy`, `audit_log`, `notification`, `refund_request`. Add `UniqueConstraint(fdr_id, stage, channel)` to `notification`.
+`user`, `institution`, `fdr`, `document`, `discrepancy`, `audit_log`, `notification`, `refund_request`, plus refresh token, one-time token and login-attempt records for manual authentication.
+
+Phase 1 adds `workflow_instance`, `workflow_node_execution`, `workflow_event`, `workflow_checkpoint`, `outbox_event`, `verification_run`, `approval_record`, `exception_item`, `correction_request`, automation rule/version, command execution and notification delivery-attempt records. `fdrs.status` remains the compatibility field; lifecycle and verification provenance are separate. The workflow tables are persistence groundwork and do not yet provide an executor, replay API or workflow UI.
 
 ### schemas/
 One file per domain; fill Pydantic fields listed in each `# TODO`. Use `model_config = ConfigDict(from_attributes=True)` for `*Out` types.
@@ -92,6 +94,11 @@ OCR uses the `FdrExtractor` protocol: `async extract(pages: list[bytes]) -> dict
 | `tasks_maturity.py` | `scan_maturities()` and `send_alert_task()` |
 Celery tasks are sync entry points: wrap async service calls with `asyncio.run(...)`.
 
+### workflow state foundation
+`services/workflow_state_service.py` maintains the lifecycle/status projection, creates workflow instances for new cases and appends status events/outbox intents. `services/outbox_service.py` dispatches due jobs and notification intents. `workflows/definition.py`, `workflows/transitions.py` and `workers/tasks_workflow.py` execute the persisted extract/validate/route nodes, with worker leases, node attempts, checkpoints and correction/official wait states. `scripts/backfill_workflows.py` idempotently imports legacy state, document versions, verification snapshots and auditable human decisions. Imported executions are marked `not_started`; historical node attempts cannot be reconstructed.
+
+`api/v1/workflows.py` exposes case/node/event/checkpoint reads, SSE, exception inbox, approval, claim, pause/resume, retry/replay/version and comparison endpoints. `api/v1/commands.py` provides a typed allowlisted command plan/confirm/cancel/history/stream flow; its current interpreter is deterministic until a separately approved LLM provider is configured. Official pages include `WorkflowControlRoom`, `WorkflowExecution`, `ExceptionInbox`, and `CommandCenter`.
+
 ### mock_bank_api/ (DEMO, separate service)
 `main.py` mounts `banks/sbi.py`, `pnb.py`, `hdfc.py`; `store.py` loads `data/seed_fdrs.json`. Each bank may return slightly different field names; `bank_verification_service` normalizes them to `BankVerifyResponse`. **Never call real bank APIs.**
 
@@ -99,7 +106,7 @@ Celery tasks are sync entry points: wrap async service calls with `asyncio.run(.
 | Folder | Build |
 |---|---|
 | `api/` | thin Axios wrappers, one per backend router; no UI logic |
-| `store/` | `authStore` (token, user, role), `uiStore` (filters, sidebar) |
+| `store/` | `authStore` (in-memory user/session state only), `uiStore` (filters, sidebar) |
 | `hooks/` | React Query hooks wrapping `api/*`; `useMaturityCountdown` |
 | `utils/` | `formatINR`, `formatDate`, `getBadgeMeta`, `getStatusMeta` |
 | `components/common` | `MetricCard`, `TrustBadge`, `StatusPill`, `DataTable`, `FileDropzone`, `RoleGuard`, `ConfirmDialog` |
@@ -108,7 +115,7 @@ Celery tasks are sync entry points: wrap async service calls with `asyncio.run(.
 | `components/refund` | `RefundForm`, `RefundDecisionPanel` |
 | `pages/auth` | `Login`, `MfaVerify` |
 | `pages/institution` | `InstitutionDashboard`, `UploadFdr`, `MyFdrs`, `RefundClaim` |
-| `pages/bureau` | `BureauDashboard`, `ScrutinyQueue`, `ScrutinySplitView`, `DiscrepancyBoard`, `InstitutionsList`, `AuditLogs` |
+| `pages/bureau` / `pages/admin` | Official scrutiny pages and Admin account, registration and institution screens |
 | `routes/AppRoutes.jsx` | route table in the comment; wrap with `RoleGuard` |
 
 ## 4. How modules communicate
@@ -129,7 +136,7 @@ Worker: tasks_verification
 
 Beat: tasks_maturity.scan_maturities
    -> fdr query -> notification_service -> email_client / telegram_client / whatsapp_mock
-   -> notifications table + escalate_to_bureau
+   -> notifications table + AICTE Official escalation
 
 Dashboard: BureauDashboard -> useBureauDashboard -> /dashboard/bureau
    -> dashboard_service -> SQL aggregates (+ Redis cache)
@@ -146,7 +153,7 @@ Dashboard: BureauDashboard -> useBureauDashboard -> /dashboard/bureau
 | Anything that mutates state -> `audit_service.record` | `(user_id, entity, entity_id, action, ip, delta{field:[old,new]})` |
 
 ### 4.3 Auth flow
-`Login.jsx` -> `/auth/login` -> (maybe `/mfa`) -> `authStore.setSession` -> `RoleGuard` + Axios interceptor attach `Authorization: Bearer`. Backend `get_current_user` -> `require_roles`.
+Role login page -> `/auth/login/{portal}` -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Backend checks active account status and `require_roles` on every protected request.
 
 ## 5. Suggested build order (hackathon, 3 days)
 **Day 1 (skeleton that runs):** `core/*` -> `models` + migration -> `auth` router -> `seed.py` -> frontend `Login`, `authStore`, `RoleGuard`, `Layout`.
@@ -158,7 +165,7 @@ Prompt pattern: *"Implement `backend/app/services/fraud_service.py` per the comm
 One file per prompt; run `pytest` / `npm run dev` after each; keep contracts in section 4.2 unchanged unless you update both sides and these docs.
 
 ## 7. Definition of done (demo)
-- [x] Login for 3 roles (institution, officer, chief) — exercised institution, officer, chief and admin tokens in the live demo.
+- [x] Login for 3 roles (institution, AICTE official, admin).
 - [x] Upload scan -> OCR data + bank check + badge appear — live Ollama OCR confidence 0.833, mock bank found, green badge, no discrepancy.
 - [x] Seeded mismatch shows red badge + discrepancy list — seed creates red HDFC amount mismatches; 13 open seeded discrepancies were returned by the live API.
 - [x] Split viewer works; approve/reject updates status and audit log — SplitViewer smoke test passed; live officer approval generated six audit events.

@@ -1,11 +1,14 @@
 """Aggregates all v1 routers."""
 
 from fastapi import APIRouter
-from . import auth, institutions, fdrs, documents, verification, notifications, refunds, dashboard, audit
+from . import auth, admin, institutions, fdrs, documents, verification, notifications, refunds, dashboard, audit, workflows, commands
 
 
 api_router = APIRouter()
 api_router.include_router(auth.router,prefix='/auth',tags=['auth'])
+api_router.include_router(admin.router,prefix='/admin',tags=['admin'])
+api_router.include_router(workflows.router,prefix='/workflows',tags=['workflows'])
+api_router.include_router(commands.router,prefix='/commands',tags=['commands'])
 api_router.include_router(institutions.router,prefix='/institutions',tags=['institutions'])
 api_router.include_router(fdrs.router,prefix='/fdrs',tags=['fdrs'])
 api_router.include_router(documents.router,prefix='/documents',tags=['documents'])

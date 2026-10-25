@@ -8,6 +8,7 @@ from app.models.fdr import FDR
 from app.core.enums import FDRStatus
 from app.services import notification_service
 from app.services.audit_service import record
+from app.services.workflow_state_service import sync_legacy_status
 
 
 @celery_app.task(name='app.workers.tasks_maturity.scan_maturities')
@@ -33,6 +34,7 @@ async def _scan():
             days=(f.maturity_date-date.today()).days
             if days<0 and f.status not in (FDRStatus.EXPIRED.value,FDRStatus.RENEWAL_REQUESTED.value,FDRStatus.RELEASED.value):
                 previous=f.status;f.status=FDRStatus.EXPIRED.value
+                await sync_legacy_status(session, f, event_type='FDR_EXPIRED', previous_status=previous)
                 await record(session,None,'fdr',f.id,'expired','scheduler',{'status':[previous,f.status]})
             stage=await notification_service.stage_for(days)
             if stage and f.last_alert_stage!=stage.value:

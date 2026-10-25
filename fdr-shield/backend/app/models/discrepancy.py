@@ -14,4 +14,6 @@ class Discrepancy(Base):
     extracted_value: Mapped[str]
     source: Mapped[str]  # ocr | bank_api
     severity: Mapped[str]  # low | high
+    rule_id: Mapped[str | None] = mapped_column(nullable=True)
+    rule_version: Mapped[str | None] = mapped_column(nullable=True)
     resolved: Mapped[bool] = mapped_column(default=False)

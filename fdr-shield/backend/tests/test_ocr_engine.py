@@ -46,6 +46,21 @@ def test_ollama_vision_valid_json_and_image_resize(monkeypatch):
     assert set(body['format']['properties'])==set(FIELDS)
     image=Image.open(BytesIO(base64.b64decode(body['messages'][0]['images'][0])))
     assert max(image.size)<=1600 and image.format=='JPEG'
+    assert 'untrusted' in body['messages'][0]['content'].lower()
+    assert 'tools' not in body
+
+
+def test_vision_source_spans_are_schema_checked_and_document_is_untrusted(monkeypatch):
+    seen={}
+    span_payload={key:{'page':1,'quote':f'{key}: SBI100001'} for key in FIELDS}
+    async def handler(request):
+        seen['body']=json.loads(request.content)
+        return httpx.Response(200,json={'message':{'content':json.dumps(span_payload)}})
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    spans=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract_source_spans([jpeg()],fields()))
+    assert spans['fdr_number']=={'page':1,'quote':'fdr_number: SBI100001','trust':'extracted'}
+    assert 'UNTRUSTED DATA' in seen['body']['messages'][0]['content']
+    assert 'tools' not in seen['body']
 
 
 def test_invalid_json_is_retried_once_then_succeeds(monkeypatch):
@@ -76,6 +91,14 @@ def test_http_error_returns_empty_result(monkeypatch):
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
     result=asyncio.run(ocr_service.extract_fdr_fields(jpeg(),'image/jpeg'))
     assert isinstance(result,OcrResult) and result.confidence==0 and result.fdr_number is None
+
+
+def test_corrupt_pdf_degrades_to_unextracted_result(monkeypatch):
+    class FakeEngine:
+        async def extract(self,pages): return fields()
+    monkeypatch.setattr(ocr_service,'get_engine',lambda:FakeEngine())
+    result=asyncio.run(ocr_service.extract_fdr_fields(b'not a pdf','application/pdf'))
+    assert result.confidence==0 and result.fdr_number is None
 
 
 def test_pdf_is_converted_and_only_first_two_pages_sent(monkeypatch):

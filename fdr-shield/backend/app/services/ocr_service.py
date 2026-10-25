@@ -16,7 +16,7 @@ from app.schemas.verification import OcrResult
 logger = logging.getLogger(__name__)
 
 
-async def extract_fdr_fields(file_bytes: bytes, content_type: str) -> OcrResult:
+async def extract_fdr_fields(file_bytes: bytes, content_type: str, *, raise_errors: bool = False) -> OcrResult:
     try:
         pages = await _to_pages(file_bytes, content_type)
         values = await get_engine().extract(pages)
@@ -36,7 +36,22 @@ async def extract_fdr_fields(file_bytes: bytes, content_type: str) -> OcrResult:
         return result
     except Exception:
         logger.exception('FDR OCR extraction failed; leaving the record unverified')
+        if raise_errors:
+            raise
         return OcrResult(confidence=0)
+
+
+async def extract_source_spans(file_bytes: bytes, content_type: str, fields: dict) -> dict:
+    """Optional locator references from adapters that can return grounded page quotes."""
+    try:
+        pages=await _to_pages(file_bytes,content_type)
+        engine=get_engine()
+        method=getattr(engine,'extract_source_spans',None)
+        if not method: return {}
+        return await method(pages,fields)
+    except Exception:
+        logger.exception('OCR evidence-locator extraction failed; retaining field values without spans')
+        return {}
 
 
 async def _to_pages(file_bytes: bytes, content_type: str) -> list[bytes]:

@@ -34,10 +34,26 @@ async def compare_records(declared: dict, ocr: OcrResult | None, bank: BankVerif
     return result
 
 
-async def persist_discrepancies(session: AsyncSession, fdr_id: int, items: list[DiscrepancyOut]) -> None:
-    # Replace unresolved rows for FDR; insert new
+async def persist_discrepancies(session: AsyncSession, fdr_id: int, items: list[DiscrepancyOut],
+                                validation_findings: list | None = None) -> None:
+    # Replace unresolved rows for this verification pass; retain resolved history.
     await session.execute(delete(Discrepancy).where(Discrepancy.fdr_id==fdr_id,Discrepancy.resolved.is_(False)))
-    session.add_all([Discrepancy(fdr_id=fdr_id,field=x.field,declared_value=x.declared_value or '',extracted_value=x.extracted_value or '',source=x.source,severity=x.severity,resolved=False) for x in items])
+    rows=[]
+    seen=set()
+    for finding in items:
+        key=(finding.field,finding.source,finding.declared_value,finding.extracted_value)
+        if key in seen: continue
+        seen.add(key)
+        rows.append(Discrepancy(fdr_id=fdr_id,field=finding.field,declared_value=finding.declared_value or '',
+            extracted_value=finding.extracted_value or '',source=finding.source,severity=finding.severity,resolved=False))
+    for finding in validation_findings or []:
+        key=(finding.field,finding.source,finding.declared_value,finding.extracted_value)
+        if key in seen: continue
+        seen.add(key)
+        rows.append(Discrepancy(fdr_id=fdr_id,field=finding.field,declared_value=finding.declared_value or '',
+            extracted_value=finding.extracted_value or '',source=finding.source,severity=finding.severity,
+            rule_id=finding.rule_id,rule_version=finding.rule_version,resolved=False))
+    session.add_all(rows)
 
 
 async def severity_for(field: str, declared: str, found: str) -> str:

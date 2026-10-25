@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/bureau")
-async def bureau_dashboard(session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief','admin'))):
+async def bureau_dashboard(session=Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
     # Metric cards + charts; cache in Redis 60s
     return await bureau_metrics(session)
 

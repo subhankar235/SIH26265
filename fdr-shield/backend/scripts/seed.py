@@ -25,6 +25,9 @@ NAMES = [
 ]
 
 async def seed():
+    from app.core.config import get_settings
+    if get_settings().app_env.lower() not in {'dev', 'development', 'test'}:
+        raise RuntimeError('Demo seed data is disabled outside development/test environments.')
     await init_db()
     bank_rows = {
         'sbi': [
@@ -48,10 +51,13 @@ async def seed():
                 session.add(User(email=email, password_hash=hash_password(PASSWORD), role=Role.INSTITUTION.value,
                                  institution_id=inst.id, is_active=True))
 
-        staff = [('officer@example.test', Role.SCRUTINY_OFFICER), ('chief@example.test', Role.BUREAU_CHIEF), ('admin@example.test', Role.ADMIN)]
+        staff = [('officer@example.test', Role.AICTE_OFFICIAL), ('chief@example.test', Role.AICTE_OFFICIAL), ('admin@example.test', Role.ADMIN)]
         for email, role in staff:
-            if not await session.scalar(select(User.id).where(User.email == email)):
+            existing_user = await session.scalar(select(User).where(User.email == email))
+            if not existing_user:
                 session.add(User(email=email, password_hash=hash_password(PASSWORD), role=role.value, is_active=True))
+            else:
+                existing_user.role = role.value
 
         today = date.today()
         offsets = [-20, 0, 30, 90, 120, 30, 90, 180, -5, 60, 120, 30, 90, 180, 365]
@@ -104,7 +110,7 @@ async def seed():
         image.save(scan_dir / fname)
 
     print('FDR-Shield demo credentials (password for all: DemoPass123!):')
-    print('  officer@example.test, chief@example.test, admin@example.test')
+    print('  officer@example.test and chief@example.test (AICTE Official), admin@example.test')
     for i in range(1, 6): print(f'  institution{i}@example.test')
 
 if __name__ == '__main__': asyncio.run(seed())

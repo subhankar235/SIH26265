@@ -13,15 +13,15 @@ router = APIRouter()
 
 
 @router.get("")
-async def list_institutions(q: str | None = None, state: str | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('scrutiny_officer','bureau_chief','admin'))):
+async def list_institutions(q: str | None = None, state: str | None = None, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
     # Paginated search; include fdr_count and total_value
     return await institution_service.search_institutions(session,q,state,page)
 
 
 @router.post("")
 async def create_institution(body: InstitutionCreate, session=Depends(get_session), user=Depends(require_roles('admin'))):
-    # Create institution + default institution user
-    return await institution_service.create_institution(session,body)
+    # Create institution and invite its initial account holder.
+    return await institution_service.create_institution(session,body,user)
 
 
 @router.get("/{institution_id}")
