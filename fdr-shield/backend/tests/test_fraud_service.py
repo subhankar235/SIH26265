@@ -14,3 +14,10 @@ def test_compare_records_treats_integer_and_decimal_amounts_as_equal():
     ocr=OcrResult(fdr_number='SBI100001',amount='500000.00',maturity_date='2027-03-31',bank_name='SBI',holder_name='ABC Institute')
     bank=BankVerifyResponse(found=True,status='ACTIVE',amount='500000.0',maturity_date='2027-03-31',holder='ABC Institute')
     assert asyncio.run(compare_records(declared,ocr,bank))==[]
+
+
+def test_all_null_ocr_does_not_create_discrepancies():
+    ocr=OcrResult(confidence=0)
+    declared={'fdr_number':'SBI100001','amount':100,'bank_name':'SBI','holder':'Test','maturity_date':'2027-01-01'}
+    bank=BankVerifyResponse(found=False)
+    assert asyncio.run(compare_records(declared,ocr,bank))==[]

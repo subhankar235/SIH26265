@@ -15,6 +15,22 @@
       "status": "ACTIVE"
     },
     {
+      "fdr_number": "00000036821805542",
+      "holder_name": "MR. SUBHASH KUMAR JAIN / MR. SUJEET KUMAR JAIN",
+      "amount": 49000,
+      "issue_date": "2017-04-29",
+      "maturity_date": "2018-04-30",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "SBI-DEMO-MISMATCH",
+      "holder_name": "ABC Institute of Technology",
+      "amount": 99000,
+      "issue_date": "2017-04-29",
+      "maturity_date": "2018-04-30",
+      "status": "ACTIVE"
+    },
+    {
       "fdr_number": "SBI700000",
       "holder_name": "ABC Institute of Technology",
       "amount": 500000.0,
@@ -59,6 +75,14 @@
       "status": "ACTIVE"
     },
     {
+      "fdr_number": "1558000101602751",
+      "holder_name": "KARAMBIR",
+      "amount": 800000,
+      "issue_date": "2024-09-14",
+      "maturity_date": "2026-09-14",
+      "status": "ACTIVE"
+    },
+    {
       "fdr_number": "PNB700001",
       "holder_name": "XYZ College of Engineering",
       "amount": 550000.0,
@@ -100,6 +124,14 @@
       "holder_name": "PQR Polytechnic",
       "amount": 750000,
       "maturity_date": "2026-11-20",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "50300277148239",
+      "holder_name": "MS RAJWINDER KAUR",
+      "amount": 450000,
+      "issue_date": "2022-09-01",
+      "maturity_date": "2023-09-03",
       "status": "ACTIVE"
     },
     {

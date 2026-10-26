@@ -13,6 +13,8 @@ from sqlalchemy import select
 
 async def compute_badge(bank: BankVerifyResponse | None, discrepancies: list[DiscrepancyOut]) -> TrustBadge:
     # BANK_VERIFIED if bank.found and no unresolved high discrepancy; MISMATCH if any high; else SELF_DECLARED
+    if not bank and not discrepancies:
+        return TrustBadge.SELF_DECLARED
     if any(not getattr(d,'resolved',False) and d.severity=='high' for d in discrepancies): return TrustBadge.MISMATCH
     if bank and bank.found and bank.status=='ACTIVE': return TrustBadge.BANK_VERIFIED
     return TrustBadge.SELF_DECLARED

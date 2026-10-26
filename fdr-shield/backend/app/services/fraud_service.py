@@ -15,6 +15,8 @@ async def compare_records(declared: dict, ocr: OcrResult | None, bank: BankVerif
     result=[]
     ocr_values=ocr.model_dump() if ocr else {}
     if ocr_values.get('holder_name') is not None: ocr_values['holder']=ocr_values['holder_name']
+    if not any(ocr_values.get(key) is not None for key in ('fdr_number','bank_name','holder_name','amount','issue_date','maturity_date')):
+        return []
     sources=[('ocr',ocr_values),('bank_api',bank.model_dump() if bank else {})]
     keys=('fdr_number','amount','maturity_date','bank_name','holder')
     for source,record in sources:
