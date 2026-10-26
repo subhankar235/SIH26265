@@ -4,9 +4,18 @@ from app.core.config import get_settings
 from app.integrations.ocr.base import FdrExtractor
 
 
+class DisabledOcrEngine:
+    """No-provider OCR mode; lets users enter/review fields manually without a network call."""
+
+    async def extract(self, pages: list[bytes]) -> dict:
+        return {key: None for key in ('fdr_number', 'bank_name', 'branch', 'holder_name', 'amount', 'issue_date', 'maturity_date')}
+
+
 @lru_cache(maxsize=1)
 def get_engine() -> FdrExtractor:
     engine = get_settings().ocr_engine.strip().lower()
+    if engine == 'disabled':
+        return DisabledOcrEngine()
     if engine == 'ollama_vision':
         from app.integrations.ocr.ollama_vision_engine import OllamaVisionEngine
         return OllamaVisionEngine()

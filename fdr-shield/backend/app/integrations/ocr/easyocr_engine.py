@@ -16,4 +16,4 @@ class EasyOcrEngine:
         from app.services.ocr_service import parse_fdr_text
         text='\n'.join([await asyncio.to_thread(read_text,p) for p in pages[:2]])
         result=await parse_fdr_text(text)
-        return {'fdr_number':result.fdr_number,'bank_name':result.bank_name,'holder_name':result.holder_name,'amount':float(result.amount) if result.amount is not None else None,'issue_date':result.issue_date.isoformat() if result.issue_date else None,'maturity_date':result.maturity_date.isoformat() if result.maturity_date else None}
+        return {'fdr_number':result.fdr_number,'bank_name':result.bank_name,'branch':result.branch,'holder_name':result.holder_name,'amount':float(result.amount) if result.amount is not None else None,'issue_date':result.issue_date.isoformat() if result.issue_date else None,'maturity_date':result.maturity_date.isoformat() if result.maturity_date else None}

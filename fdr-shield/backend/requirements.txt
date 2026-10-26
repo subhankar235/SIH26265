@@ -9,6 +9,8 @@ alembic
 psycopg2-binary
 python-jose[cryptography]
 passlib[bcrypt]
+argon2-cffi
+email-validator
 pyotp
 python-multipart
 celery[redis]==5.4.*
