@@ -44,6 +44,10 @@ def test_trust_badge_outcomes(bank, discrepancies, expected):
     assert asyncio.run(compute_badge(bank, discrepancies)) is expected
 
 
+def test_all_null_ocr_without_bank_stays_yellow():
+    assert asyncio.run(compute_badge(None, [])) is TrustBadge.SELF_DECLARED
+
+
 @pytest.mark.parametrize('page,size,skip,limit', [
     (1, 20, 0, 20), (3, 10, 20, 10), (0, 0, 0, 1), (99, 1000, 9800, 100),
 ])

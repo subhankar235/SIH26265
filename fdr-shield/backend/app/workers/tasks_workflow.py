@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy import select, func
 from app.core.database import SessionLocal
 from .celery_app import celery_app, run_async_task
-from app.core.enums import (AuthorizationState, ExecutionState, FDRStatus,
+from app.core.enums import (AuthorizationState, ExecutionState, FDRStatus, TrustBadge,
     LifecycleState, VerificationLevel)
 from app.models.discrepancy import Discrepancy
 from app.models.document import Document
@@ -318,6 +318,11 @@ async def _execute_node(claim: dict) -> tuple[dict, str | None]:
             settings=__import__('app.core.config', fromlist=['get_settings']).get_settings()
             extraction_result=make_extraction_result(fdr,doc,extracted,
                 settings.ollama_model if settings.ocr_engine=='ollama_vision' else settings.ocr_engine)
+            # Authenticity rejection (and unreadable pages) stays in the submitted/yellow queue.
+            if extracted.confidence <= 0:
+                fdr.trust_badge = TrustBadge.SELF_DECLARED.value
+                await session.commit()
+                return {'confidence': 0, 'extraction_result': extraction_result.model_dump(mode='json')}, 'human_review'
             validation = await validate_fdr(session,fdr,extraction_result)
             bank = await bank_verification_service.verify_with_bank(
                 fdr.bank_name, fdr.fdr_number, fdr.declared_data.get('holder', ''))

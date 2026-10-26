@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     ollama_model: str = ''
     ollama_api_key: str = ''
     ollama_timeout: float = 120
+    ocr_format_check: bool = True
+    ocr_reference_dir: str = 'reference_formats'
     storage_backend: str = 'minio'
     storage_local_path: str = './var/fdr-documents'
     celery_task_always_eager: bool = False

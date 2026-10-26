@@ -1,7 +1,7 @@
 """Exercise cookie login -> upload -> verification -> official decision -> alert -> refund."""
 import asyncio
 import os
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 import httpx
 
@@ -28,9 +28,9 @@ async def main():
     if not scan.exists(): raise RuntimeError('Seed sample scan is missing; run scripts.seed first')
     async with httpx.AsyncClient(base_url=API, timeout=20) as client:
         institution = await login(client, 'institution1@example.test')
-        fields = {'fdr_number':'SBI700000', 'bank_name':'SBI', 'branch':'Main Branch', 'amount':'500000',
-                  'issue_date':(date.today()-timedelta(days=365)).isoformat(),
-                  'maturity_date':(date.today()-timedelta(days=20)).isoformat(), 'holder':'ABC Institute of Technology'}
+        fields = {'fdr_number':'00000036821805542', 'bank_name':'SBI', 'branch':'C.S.W.T. BSF CAMPUS', 'amount':'49000',
+                  'issue_date':'2017-04-29', 'maturity_date':'2018-04-30',
+                  'holder':'MR. SUBHASH KUMAR JAIN / MR. SUJEET KUMAR JAIN'}
         with scan.open('rb') as source:
             response = await client.post('/api/v1/fdrs', data=fields,
                 files={'file':('sample-sbi.png', source, 'image/png')}, headers=institution)

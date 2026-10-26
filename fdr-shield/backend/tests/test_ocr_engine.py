@@ -20,12 +20,14 @@ def jpeg(size=(80, 40), color='white'):
 def fields(**overrides):
     result={key:None for key in FIELDS}
     result.update({'fdr_number':'SBI100001','bank_name':'SBI','holder_name':'ABC Institute of Technology','amount':1000000,'issue_date':'2026-03-31','maturity_date':'2027-03-31'})
+    result.update({'format_match':'sbi','format_reason':'Matches the SBI reference layout.'})
     result.update(overrides)
     return result
 
 
 def settings(**overrides):
-    base={'ollama_base_url':'http://ollama.test','ollama_model':'gemma4:cloud','ollama_api_key':'','ollama_timeout':2}
+    base={'ollama_base_url':'http://ollama.test','ollama_model':'gemma4:cloud','ollama_api_key':'','ollama_timeout':2,
+          'ocr_format_check':True,'ocr_reference_dir':'reference_formats'}
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -43,8 +45,12 @@ def test_ollama_vision_valid_json_and_image_resize(monkeypatch):
     assert request.url.path=='/api/chat'
     assert request.headers['authorization']=='Bearer test-key'
     assert body['stream'] is False and body['options']['temperature']==0
-    assert set(body['format']['properties'])==set(FIELDS)
-    image=Image.open(BytesIO(base64.b64decode(body['messages'][0]['images'][0])))
+    assert set(body['format']['properties'])==set(FIELDS)|{'format_match','format_reason'}
+    assert body['model']=='gemma4:cloud' and len(body['messages'][0]['images'])==4
+    assert 'Reference 1: genuine SBI format' in body['messages'][0]['content']
+    assert 'Reference 2: genuine HDFC format' in body['messages'][0]['content']
+    assert 'Reference 3: genuine PNB format' in body['messages'][0]['content']
+    image=Image.open(BytesIO(base64.b64decode(body['messages'][0]['images'][-1])))
     assert max(image.size)<=1600 and image.format=='JPEG'
     assert 'untrusted' in body['messages'][0]['content'].lower()
     assert 'tools' not in body
@@ -72,6 +78,68 @@ def test_invalid_json_is_retried_once_then_succeeds(monkeypatch):
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
     result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
     assert count['calls']==2 and result['amount']==1000000
+
+
+def test_none_format_match_clears_all_fields(monkeypatch):
+    from app.integrations.ocr.reference_formats import clear_reference_cache
+    clear_reference_cache()
+    async def handler(request):
+        payload=fields(format_match='none',format_reason='Does not resemble a bank format.')
+        assert payload['format_match'] == 'none'
+        assert len(json.loads(request.content)['messages'][0]['images']) == 4
+        assert json.loads(request.content)['format']['properties']['format_match']['enum'] == ['sbi','hdfc','pnb','none']
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+    assert set(result)==set(FIELDS) and all(value is None for value in result.values())
+    clear_reference_cache()
+
+
+def test_negative_sample_short_circuits_model(monkeypatch):
+    from pathlib import Path
+    from app.integrations.ocr.reference_formats import is_known_negative, clear_reference_cache
+    negative=Path('reference_formats/negative_samples/sample-sbi.png').read_bytes()
+    assert is_known_negative(negative)
+    async def handler(request): raise AssertionError('known negative must not call Ollama')
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([negative]))
+    assert set(result)==set(FIELDS) and all(value is None for value in result.values())
+    clear_reference_cache()
+
+
+def test_missing_references_warn_and_fall_back_to_plain_extraction(monkeypatch, tmp_path, caplog):
+    payload=fields()
+    from app.integrations.ocr.reference_formats import clear_reference_cache
+    clear_reference_cache()
+    async def handler(request):
+        body=json.loads(request.content)
+        assert len(body['messages'][0]['images'])==1
+        assert 'format_match' not in body['messages'][0]['content']
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings(ocr_reference_dir=str(tmp_path)))
+    monkeypatch.setattr('app.integrations.ocr.reference_formats.get_settings',lambda:settings(ocr_reference_dir=str(tmp_path)))
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+    assert result['fdr_number']=='SBI100001'
+    assert 'OCR reference format missing' in caplog.text
+    clear_reference_cache()
+
+
+def test_format_check_disabled_uses_plain_six_field_prompt(monkeypatch):
+    async def handler(request):
+        body=json.loads(request.content)
+        assert len(body['messages'][0]['images'])==1
+        assert 'Reference 1' not in body['messages'][0]['content']
+        assert set(body['format']['properties'])==set(FIELDS)
+        return httpx.Response(200,json={'message':{'content':json.dumps(fields())}})
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings(ocr_format_check=False))
+    assert asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))['fdr_number']=='SBI100001'
+
+
+def test_ocr_public_signatures_remain_unchanged():
+    import inspect
+    from app.integrations.ocr.base import FdrExtractor
+    assert str(inspect.signature(ocr_service.extract_fdr_fields)) == "(file_bytes: 'bytes', content_type: 'str', *, raise_errors: 'bool' = False) -> 'OcrResult'"
+    assert str(inspect.signature(FdrExtractor.extract)) == "(self, pages: list[bytes]) -> app.integrations.ocr.base.FdrFields"
 
 
 def test_json_markdown_fence_is_normalized_without_retry(monkeypatch):
