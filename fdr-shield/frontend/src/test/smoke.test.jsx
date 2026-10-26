@@ -6,6 +6,7 @@ import RoleGuard from '../components/common/RoleGuard';
 import TrustBadge from '../components/common/TrustBadge';
 import SplitViewer from '../components/fdr/SplitViewer';
 import Login from '../pages/auth/Login';
+import { InstitutionRegister, OfficialRegister } from '../pages/auth/AuthPages';
 import FileDropzone from '../components/common/FileDropzone';
 import RefundDecisionPanel from '../components/refund/RefundDecisionPanel';
 import FdrUploadForm from '../components/fdr/FdrUploadForm';
@@ -103,6 +104,21 @@ describe('FDR-Shield UI smoke tests', () => {
     expect(client.post).toHaveBeenCalledTimes(1);
     finish({data:{mfa_required:false,user:{id:2,email:'root@example.test',role:'admin'}}});
     await screen.findByText('Super Admin ready');
+  });
+
+  it.each([
+    ['Institution registration', InstitutionRegister],
+    ['AICTE Official application', OfficialRegister],
+  ])('lets users reveal and hide their password on %s', (title, RegistrationPage) => {
+    render(<MemoryRouter><RegistrationPage/></MemoryRouter>);
+    const password = screen.getByLabelText(/Password/);
+    expect(password).toHaveAttribute('type', 'password');
+    fireEvent.change(password, {target: {value: 'VisibleOnlyOnRequest123!'}});
+    fireEvent.click(screen.getByRole('button', {name: 'Show password'}));
+    expect(password).toHaveAttribute('type', 'text');
+    expect(password).toHaveValue('VisibleOnlyOnRequest123!');
+    fireEvent.click(screen.getByRole('button', {name: 'Hide password'}));
+    expect(password).toHaveAttribute('type', 'password');
   });
 
   it('blocks cross-role redirect targets after successful authentication', async () => {

@@ -30,8 +30,8 @@
 |---|---|
 | `ADMIN` (first) | Created by a one-time CLI seed script using env vars. No public signup. |
 | `ADMIN` (more) | Created by an existing Admin only. |
-| `AICTE_OFFICIAL` | Created by Admin → system emails a one-time invite link → official sets own password. **No self-signup.** |
-| `INSTITUTION` | Self-registration form → email verification → **Admin approval** (status `PENDING_APPROVAL` → `ACTIVE`). Optionally Admin can also create/invite institution users. |
+| `AICTE_OFFICIAL` | Self-registration → **Super Admin approval** (status `PENDING_APPROVAL` → `ACTIVE`). Email verification is temporarily disabled. Admins may also invite officials. |
+| `INSTITUTION` | Self-registration → **AICTE Official approval** (status `PENDING_APPROVAL` → `ACTIVE`). Email verification is temporarily disabled. Optionally Admin can also create/invite institution users. |
 
 Account statuses: `PENDING_EMAIL_VERIFY`, `PENDING_APPROVAL`, `ACTIVE`, `LOCKED`, `DISABLED`, `INVITED`.
 
@@ -226,11 +226,13 @@ Apply: `Depends(require_roles(Role.AICTE_OFFICIAL))` on all workflow/debugger/co
 | POST `/auth/change-password` | authed | `{current_password, new_password}` | 204; revokes other sessions | 401, 422 |
 | POST `/auth/forgot-password` | public | `{email}` | **always 202** (same response whether or not email exists) | 429 |
 | POST `/auth/reset-password` | public | `{token, new_password}` | 204; revokes all sessions | 400 invalid/expired token, 422 |
-| POST `/auth/register/institution` | public | `{institution_name, aicte_institution_id, contact_name, email, password}` | 202; sends verify email | 409 (generic), 422, 429 |
-| POST `/auth/verify-email` | public | `{token}` | 204 → status `PENDING_APPROVAL` | 400 |
+| POST `/auth/register/institution` | public | `{institution_name, aicte_institution_id, contact_name, email, password}` | 202; queues application for approval without email verification | 409 (generic), 422, 429 |
+| POST `/auth/register/official` | public | `{full_name, email, password}` | 202; queues application for Super Admin approval without email verification | 409 (generic), 422, 429 |
+| POST `/auth/verify-email` | public | `{token}` | 204 → legacy pending status becomes `PENDING_APPROVAL`; not used for new registrations | 400 |
 | POST `/auth/accept-invite` | public | `{token, password, full_name?}` | 204 → `ACTIVE` | 400, 422 |
 
-Notes: registration returns the same 202 message even if the email exists (prevents account enumeration); email is sent either way with appropriate content.
+Notes: registration returns the same 202 message even if the email exists (prevents account enumeration). New public registrations do not send verification email; approvers review applications directly.
+Migration `0014_disable_public_email_verification` moves existing Institution and AICTE Official applicants from `PENDING_EMAIL_VERIFY` to `PENDING_APPROVAL`; apply it with `python -m alembic upgrade head`. The verification endpoint remains for legacy links but is not part of new public registration.
 
 ### Step 4.9 — Admin user-management endpoints (`/api/v1/admin`, ADMIN only)
 
@@ -250,7 +252,7 @@ Notes: registration returns the same 202 message even if the email exists (preve
 **Rule:** agents/LLM tools must never call these endpoints (matches the main guide's rule that agents cannot change permissions).
 
 ### Step 4.10 — Seed script
-`python -m scripts.create_admin` reads `INITIAL_ADMIN_EMAIL/PASSWORD`, creates the first Super Admin if none exists, sets `must_change_password=true`, and serializes concurrent bootstrap attempts. The first account may alternatively be created at `/super-admin/setup` when `SUPER_ADMIN_SETUP_SECRET` is configured in the backend environment. Both paths share the bootstrap lock; the page checks for any existing Admin row and is permanently closed afterward. Remove the initial password and setup secret from the environment after setup.
+`python -m scripts.create_admin` reads `INITIAL_ADMIN_EMAIL/PASSWORD`, creates the first Super Admin if none exists, sets `must_change_password=true`, and serializes concurrent bootstrap attempts. The first account may alternatively be created at `/super-admin/setup` when `SUPER_ADMIN_SETUP_SECRET` is configured in the backend environment. For local Compose, put a unique random value in the ignored `backend/.env`, recreate the backend with `docker compose up -d backend`, and enter the same value in the setup form. Both paths share the bootstrap lock; the page checks for any existing Admin row and is permanently closed afterward. Remove the initial password and setup secret from the environment after setup.
 
 ### Step 4.11 — Rate limiting & lockout
 - Per IP: e.g., 20 login attempts / 10 min. Per email: 10 / 10 min. Registration & forgot-password: 5 / hour / IP. (Proposed values — tune.)
@@ -375,7 +377,7 @@ Hash/verify/rehash · password policy · JWT expiry/tampering/wrong type · refr
 | Every existing route | has an auth dependency (automated route-introspection test fails if any is public unintentionally) |
 
 ### E2E (Playwright/Cypress)
-Register institution → verify email → admin approves → login → logout · Admin invites official → accept invite → login · Session expiry → refresh → continue · Forced password change on first login · Forgot/reset flow.
+Register Institution/AICTE Official → appropriate administrator approves → login → logout · Admin invites user → accept invite → login · Session expiry → refresh → continue · Forced password change on first login · Forgot/reset flow.
 
 ### Proposed acceptance targets (to be validated, not achieved results)
 - 0 unauthenticated access to protected routes in the route-introspection test.

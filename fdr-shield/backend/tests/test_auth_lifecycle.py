@@ -1,6 +1,7 @@
 import asyncio
 import re
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -252,16 +253,13 @@ def test_lockout_and_institution_email_approval_lifecycle(monkeypatch):
                 aicte_institution_id='AICTE-NEW-003', contact_name='New Principal',
                 email='newcollege@example.test', phone='9888888888', state='Delhi',
                 password='New-Strong-College-Password-2026')
+            emails_before_registration = len(mail)
             await auth_service.register_institution(session, request, '127.0.0.1')
             await session.commit()
             new_user = await session.scalar(select(User).where(User.email == 'newcollege@example.test'))
-            assert new_user.status == AccountStatus.PENDING_EMAIL_VERIFY.value
-            verify_url = re.search(r'href="([^"]+)"', mail[-1][2]).group(1)
-            raw_email_token = verify_url.split('token=', 1)[1]
-            await auth_service.verify_email(session, raw_email_token)
-            await session.commit()
-            await session.refresh(new_user)
             assert new_user.status == AccountStatus.PENDING_APPROVAL.value
+            assert new_user.email_verified_at is None
+            assert len(mail) == emails_before_registration
 
             admin = User(email='admin@example.test', full_name='Admin', password_hash=hash_password('Admin-Safe-Password-2026'),
                 role=Role.ADMIN.value, institution_id=None, status=AccountStatus.ACTIVE.value, is_active=True)
@@ -274,7 +272,7 @@ def test_lockout_and_institution_email_approval_lifecycle(monkeypatch):
     asyncio.run(run())
 
 
-def test_official_registration_email_verification_super_admin_approval_and_institution_decision(monkeypatch):
+def test_registrations_skip_email_verification_and_require_the_correct_approver(monkeypatch):
     async def run():
         engine = create_async_engine('sqlite+aiosqlite:///:memory:', poolclass=StaticPool,
             connect_args={'check_same_thread': False})
@@ -298,26 +296,20 @@ def test_official_registration_email_verification_super_admin_approval_and_insti
 
             official_data = OfficialRegistrationRequest(full_name='Official Applicant',
                 email='new-official@example.test', password='Official-Applicant-Password-2026')
+            emails_before_registration = len(emails)
             await auth_service.register_official(session, official_data, '127.0.0.1')
             await session.commit()
             official = await session.scalar(select(User).where(User.email == official_data.email))
             assert official.role == Role.AICTE_OFFICIAL.value
-            assert official.status == AccountStatus.PENDING_EMAIL_VERIFY.value
-            with pytest.raises(AccountStatusError, match='Verify your email'):
+            assert official.status == AccountStatus.PENDING_APPROVAL.value
+            assert official.email_verified_at is None
+            assert len(emails) == emails_before_registration
+            with pytest.raises(AccountStatusError, match='awaiting administrator approval'):
                 await auth_service.login(session, official.email, official_data.password,
                     Role.AICTE_OFFICIAL.value, '127.0.0.1')
             await session.rollback()
             await session.refresh(official)
 
-            raw = re.search(r'token=([^&\"]+)', emails[-1][2]).group(1)
-            await auth_service.verify_email(session, raw)
-            await session.commit()
-            assert official.status == AccountStatus.PENDING_APPROVAL.value
-            with pytest.raises(AccountStatusError, match='awaiting administrator approval'):
-                await auth_service.login(session, official.email, official_data.password,
-                    Role.AICTE_OFFICIAL.value, '127.0.0.1')
-            await session.rollback()
-            official = await session.scalar(select(User).where(User.email == official_data.email))
             super_admin = await session.scalar(select(User).where(User.email == 'root@example.test'))
 
             await user_admin_service.decide_registration(session, official.id, True, None, super_admin)
@@ -339,11 +331,11 @@ def test_official_registration_email_verification_super_admin_approval_and_insti
                 email='apply-44@example.test', phone='9876543210', state='Delhi',
                 address='Campus Road', password='Green-Mountain-Deposit-2026')
             await auth_service.register_institution(session, institution_data, '127.0.0.1')
+            await session.commit()
             college = await session.scalar(select(User).where(User.email == institution_data.email))
             institution = await session.get(Institution, college.institution_id)
-            raw = re.search(r'token=([^&\"]+)', emails[-1][2]).group(1)
-            await auth_service.verify_email(session, raw)
-            await session.commit()
+            assert college.status == AccountStatus.PENDING_APPROVAL.value
+            assert college.email_verified_at is None
             with pytest.raises(PermissionDenied, match='Only an AICTE Official'):
                 await user_admin_service.decide_registration(session, college.id, True, 'No', college)
             await session.rollback()
@@ -368,8 +360,45 @@ def test_official_registration_email_verification_super_admin_approval_and_insti
     asyncio.run(run())
 
 
+def test_legacy_unverified_application_is_reviewable_and_old_token_cannot_revoke_approval():
+    async def run():
+        engine = create_async_engine('sqlite+aiosqlite:///:memory:', poolclass=StaticPool,
+            connect_args={'check_same_thread': False})
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with factory() as session:
+            institution = Institution(aicte_id='AICTE-LEGACY-1', name='Legacy College',
+                state='Delhi', head_name='Principal', contact_email='legacy@example.test',
+                contact_phone='9000000000', status='pending_approval')
+            session.add(institution)
+            await session.flush()
+            user = User(email='legacy@example.test', full_name='Legacy Principal',
+                password_hash=hash_password('Legacy-Strong-Password-2026'),
+                role=Role.INSTITUTION.value, institution_id=institution.id,
+                status=AccountStatus.PENDING_EMAIL_VERIFY.value, is_active=False)
+            admin = User(email='root@example.test', full_name='Super Admin',
+                password_hash=hash_password('Super-Admin-Password-2026'),
+                role=Role.ADMIN.value, status=AccountStatus.ACTIVE.value, is_active=True)
+            session.add_all([user, admin])
+            await session.flush()
+            raw_token = await auth_service.issue_one_time_token(
+                session, user, 'VERIFY_EMAIL', timedelta(hours=24))
+            pending = await user_admin_service.list_pending_registrations(
+                session, Role.INSTITUTION.value, SimpleNamespace(skip=0, limit=50))
+            assert [item.id for item in pending] == [user.id]
+
+            await user_admin_service.decide_registration(session, user.id, True, 'Approved', admin)
+            await session.commit()
+            await auth_service.verify_email(session, raw_token)
+            assert user.status == AccountStatus.ACTIVE.value
+            assert user.is_active
+        await engine.dispose()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('status,message', [
-    (AccountStatus.PENDING_EMAIL_VERIFY.value, 'Verify your email'),
+    (AccountStatus.PENDING_EMAIL_VERIFY.value, 'awaiting administrator approval'),
     (AccountStatus.PENDING_APPROVAL.value, 'awaiting administrator approval'),
     (AccountStatus.REJECTED.value, 'not approved'),
     (AccountStatus.SUSPENDED.value, 'temporarily suspended'),

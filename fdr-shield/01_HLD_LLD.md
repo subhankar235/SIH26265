@@ -112,7 +112,7 @@ Phase 1 adds orthogonal state dimensions while retaining `fdrs.status` as the le
 | `aicte_official` | Queue, split view, status changes, discrepancy resolution, refund decisions, audit logs |
 | `admin` (Super Admin compatibility value) | One-time bootstrap; invite/manage users; approve/reject AICTE Official and Institution applications; override verified public application decisions; system settings, reports, workflows and audit |
 
-Institution applicants self-register, verify email and normally await an AICTE Official decision. AICTE Official applicants self-register, verify email and require Super Admin approval. Super Admin may directly decide Institution applications and override verified public decisions. A one-time first-Super-Admin setup page requires a backend-only `SUPER_ADMIN_SETUP_SECRET`; it is unavailable if unset and permanently closes when any Super Admin row exists. There is no public path to create additional Super Admins. Existing database role `admin` remains the stored Super Admin role value for compatibility.
+Institution and AICTE Official applicants self-register and enter their approval queues immediately; email verification is temporarily disabled. AICTE Officials decide Institution applications; Super Admins approve/reject AICTE Official applications and may decide Institution applications directly. Super Admin may override public application decisions. A one-time first-Super-Admin setup page requires a backend-only `SUPER_ADMIN_SETUP_SECRET`; it is unavailable if unset and permanently closes when any Super Admin row exists. There is no public path to create additional Super Admins. Existing database role `admin` remains the stored Super Admin role value for compatibility.
 
 ---
 
@@ -158,7 +158,7 @@ Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discre
 | POST `/auth/login`, `/auth/refresh`, `/auth/logout`; GET `/auth/me` | any / cookie session | One shared login; backend resolves the role from the account |
 | POST `/auth/register/institution`, `/auth/register/official`, `/auth/register/super-admin`, `/auth/verify-email`, `/auth/forgot-password`, `/auth/reset-password` | public | Email-verified applicant onboarding, secret-gated one-time Super Admin setup, and one-time password recovery |
 | GET `/institutions/registrations`, POST `/institutions/registrations/{id}/decision` | AICTE Official | Primary Institution approval/rejection queue |
-| GET `/admin/registrations`, `/admin/official-registrations`; POST decision/override routes | Super Admin (`admin` stored value) | Official approval, direct Institution decisions, verified public application overrides |
+| GET `/admin/registrations`, `/admin/official-registrations`; POST decision/override routes | Super Admin (`admin` stored value) | Official approval, direct Institution decisions, public application overrides |
 | GET/POST `/institutions`, GET `/institutions/{id}`, `/institutions/{id}/fdrs` | AICTE Official / admin | Institution records |
 | POST `/fdrs/extract-preview` (multipart), POST `/fdrs` (multipart) | institution | Preview OCR, then submit only after every field is confirmed |
 | GET `/fdrs` (status, badge, institution_id) | all (scoped) | Trust Matrix |

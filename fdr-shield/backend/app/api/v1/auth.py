@@ -175,9 +175,8 @@ async def register_institution(body: InstitutionRegistrationRequest, request: Re
     try: await auth_service.register_institution(session, body, get_client_ip(request))
     except IntegrityError:
         await session.rollback()
-        await auth_service._send_registration_ack(str(body.email))
     except ValueError as exc: raise HTTPException(422, str(exc)) from exc
-    return {'message': 'If the registration can be processed, an email verification link will be sent.'}
+    return {'message': 'If the registration can be processed, it will be queued for administrator approval.'}
 
 
 @router.post('/register/official', status_code=202)
@@ -188,10 +187,9 @@ async def register_official(body: OfficialRegistrationRequest, request: Request,
         await auth_service.register_official(session, body, get_client_ip(request))
     except IntegrityError:
         await session.rollback()
-        await auth_service._send_registration_ack(str(body.email))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {'message': 'If the application can be processed, an email verification link will be sent.'}
+    return {'message': 'If the application can be processed, it will be queued for Super Admin approval.'}
 
 
 @router.post('/register/super-admin', status_code=201)

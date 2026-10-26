@@ -116,7 +116,7 @@ async def login(session: AsyncSession, email: str, password: str, portal: str | 
     # match. Invalid credentials and wrong-portal attempts remain indistinguishable.
     if user and good_password and user.role == expected_role:
         status_messages = {
-            AccountStatus.PENDING_EMAIL_VERIFY.value: 'Verify your email before signing in.',
+            AccountStatus.PENDING_EMAIL_VERIFY.value: 'Your registration is awaiting administrator approval.',
             AccountStatus.PENDING_APPROVAL.value: 'Your registration is awaiting administrator approval.',
             AccountStatus.REJECTED.value: 'This application was not approved. Contact a Super Admin for assistance.',
             AccountStatus.SUSPENDED.value: 'This account is temporarily suspended. Contact a Super Admin for assistance.',
@@ -303,10 +303,8 @@ async def _consume_token(session: AsyncSession, raw: str, purpose: str) -> tuple
 async def register_institution(session: AsyncSession, data: InstitutionRegistrationRequest, ip: str | None) -> None:
     email = str(data.email).lower()
     if await session.scalar(select(User.id).where(func.lower(User.email) == email)):
-        await _send_registration_ack(email)
         return  # Enumeration-resistant generic response; no existing account mutation.
     if await session.scalar(select(Institution.id).where(Institution.aicte_id == data.aicte_institution_id)):
-        await _send_registration_ack(email)
         return
     validate_password_strength(data.password, email, data.contact_name)
     now = utcnow()
@@ -317,13 +315,9 @@ async def register_institution(session: AsyncSession, data: InstitutionRegistrat
     await session.flush()
     user = User(email=email, full_name=data.contact_name, password_hash=hash_password(data.password),
         role=Role.INSTITUTION.value, institution_id=institution.id,
-        status=AccountStatus.PENDING_EMAIL_VERIFY.value, is_active=False)
+        status=AccountStatus.PENDING_APPROVAL.value, is_active=False)
     session.add(user)
     await session.flush()
-    raw = await issue_one_time_token(session, user, 'VERIFY_EMAIL', timedelta(hours=24))
-    cfg = get_settings()
-    await send_email(email, 'FDR-Shield registration request',
-        f'<p>If your registration can proceed, verify your email here: <a href="{cfg.frontend_origin}/verify-email?token={raw}">Continue registration</a>.</p>')
     await record(session, user.id, 'user', user.id, 'USER_REGISTERED', ip or '', {'status': [None, user.status]})
 
 
@@ -331,37 +325,26 @@ async def register_official(session: AsyncSession, data: OfficialRegistrationReq
     """Public AICTE Official application. It cannot create an active account."""
     email = str(data.email).lower()
     if await session.scalar(select(User.id).where(func.lower(User.email) == email)):
-        await _send_registration_ack(email)
         return
     validate_password_strength(data.password, email, data.full_name)
     now = utcnow()
     user = User(email=email, full_name=data.full_name, password_hash=hash_password(data.password),
         role=Role.AICTE_OFFICIAL.value, institution_id=None,
-        status=AccountStatus.PENDING_EMAIL_VERIFY.value, is_active=False,
+        status=AccountStatus.PENDING_APPROVAL.value, is_active=False,
         created_at=now, updated_at=now)
     session.add(user)
     await session.flush()
-    token = await issue_one_time_token(session, user, 'VERIFY_EMAIL', timedelta(hours=24))
-    cfg = get_settings()
-    await send_email(email, 'FDR-Shield AICTE Official application',
-        f'<p>Verify your email to submit your AICTE Official application: '
-        f'<a href="{cfg.frontend_origin}/verify-email?token={token}">Verify email</a>.</p>')
     await record(session, user.id, 'user', user.id, 'OFFICIAL_APPLICATION_SUBMITTED', ip or '',
         {'role': [None, Role.AICTE_OFFICIAL.value], 'status': [None, user.status]})
-
-
-async def _send_registration_ack(email: str) -> None:
-    cfg = get_settings()
-    await send_email(email, 'FDR-Shield registration request',
-        f'<p>If your registration can proceed, follow the instructions sent to this address or contact the AICTE administrator.</p>')
 
 
 async def verify_email(session: AsyncSession, raw: str) -> None:
     _, user = await _consume_token(session, raw, 'VERIFY_EMAIL')
     if not user: raise AuthError('This link is invalid or expired.')
-    user.email_verified_at = utcnow()
-    user.status = AccountStatus.PENDING_APPROVAL.value
-    await record(session, user.id, 'user', user.id, 'EMAIL_VERIFIED', 'system', {'status': [AccountStatus.PENDING_EMAIL_VERIFY.value, user.status]})
+    if user.status == AccountStatus.PENDING_EMAIL_VERIFY.value:
+        user.email_verified_at = utcnow()
+        user.status = AccountStatus.PENDING_APPROVAL.value
+        await record(session, user.id, 'user', user.id, 'EMAIL_VERIFIED', 'system', {'status': [AccountStatus.PENDING_EMAIL_VERIFY.value, user.status]})
 
 
 async def accept_invite(session: AsyncSession, raw: str, password: str, full_name: str | None) -> None:

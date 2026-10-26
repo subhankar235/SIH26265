@@ -121,9 +121,9 @@ export default function AdminAccounts({ registrations = false, officialRegistrat
           <td className="p-3">{row.full_name}<br/><span className="text-slate-500">{row.email}</span></td>
           <td className="p-3">{row.role === 'admin' ? 'Super Admin' : row.role.replaceAll('_', ' ')}</td>
           <td className="p-3">{row.institution_id ?? '—'}</td>
-          <td className="p-3">{row.status}</td>
+          <td className="p-3">{row.status === 'pending_email_verify' ? 'pending approval' : row.status}</td>
           <td className="p-3"><div className="flex flex-wrap gap-2">
-            {registrations && row.status === 'pending_approval' && <>
+            {registrations && ['pending_approval', 'pending_email_verify'].includes(row.status) && <>
               <button disabled={action.isPending} onClick={() => decide(row, 'approve')} className="rounded bg-green-100 px-2 py-1">Approve</button>
               <button disabled={action.isPending} onClick={() => decide(row, 'reject')} className="rounded bg-red-100 px-2 py-1">Reject</button>
             </>}

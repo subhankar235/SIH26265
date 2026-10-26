@@ -1,10 +1,24 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { acceptInvite, changePassword, forgotPassword, registerInstitution, registerOfficial, resetPassword, verifyEmail } from '../../api/auth.api';
 
 function AuthPanel({ title, children }) {
   return <main className="grid min-h-screen place-items-center bg-slate-50 p-5"><section className="w-full max-w-xl rounded-2xl border bg-white p-7 shadow-sm"><h1 className="text-2xl font-bold">{title}</h1>{children}</section></main>;
+}
+
+function PasswordField({ name, minLength, maxLength, autoComplete = 'new-password', inputClassName = 'mt-1 w-full rounded-lg border p-3' }) {
+  const [visible, setVisible] = useState(false);
+  return <span className="relative mt-1 block">
+    <input name={name} type={visible ? 'text' : 'password'} autoComplete={autoComplete}
+      minLength={minLength} maxLength={maxLength} required className={`${inputClassName} pr-12`}/>
+    <button type="button" aria-label={visible ? 'Hide password' : 'Show password'}
+      aria-pressed={visible} onClick={() => setVisible(value => !value)}
+      className="absolute inset-y-0 right-0 grid w-12 place-items-center rounded-r-lg text-slate-600 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-700">
+      {visible ? <EyeOff size={18} aria-hidden="true"/> : <Eye size={18} aria-hidden="true"/>}
+    </button>
+  </span>;
 }
 
 export function OfficialRegister() {
@@ -14,22 +28,22 @@ export function OfficialRegister() {
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     try {
       await registerOfficial(data);
-      setMessage('If the application can be processed, an email verification link will be sent. After verifying, it will await Super Admin approval.');
+      setMessage('Your application has been submitted and is awaiting Super Admin approval. You can sign in after it is approved.');
     } catch (err) {
       setError(err.response?.data?.error?.message || err.response?.data?.detail || 'Could not submit the application. Check the fields and try again.');
     }
   }
-  return <AuthPanel title="AICTE Official application"><p className="mt-2 text-sm text-slate-600">Verify your email, then wait for Super Admin approval before signing in.</p>{message ? <p className="mt-5 rounded-lg bg-green-50 p-4 text-green-900" role="status">{message}</p> : <form onSubmit={submit} className="mt-5 space-y-3"><label className="block text-sm">Full name<input name="full_name" autoComplete="name" minLength="2" maxLength="255" required className="mt-1 w-full rounded-lg border p-3"/></label><label className="block text-sm">Official email<input name="email" type="email" autoComplete="email" required className="mt-1 w-full rounded-lg border p-3"/></label><label className="block text-sm">Password (12+ characters)<input name="password" type="password" autoComplete="new-password" minLength="12" maxLength="128" required className="mt-1 w-full rounded-lg border p-3"/></label>{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<button className="w-full rounded-lg bg-indigo-950 p-3 font-semibold text-white">Submit application</button></form>}<p className="mt-5 text-sm"><Link className="text-indigo-800 underline" to="/login">Back to shared login</Link></p></AuthPanel>;
+  return <AuthPanel title="AICTE Official application"><p className="mt-2 text-sm text-slate-600">Submit your application for Super Admin approval. You can sign in after it is approved.</p>{message ? <p className="mt-5 rounded-lg bg-green-50 p-4 text-green-900" role="status">{message}</p> : <form onSubmit={submit} className="mt-5 space-y-3"><label className="block text-sm">Full name<input name="full_name" autoComplete="name" minLength="2" maxLength="255" required className="mt-1 w-full rounded-lg border p-3"/></label><label className="block text-sm">Official email<input name="email" type="email" autoComplete="email" required className="mt-1 w-full rounded-lg border p-3"/></label><label className="block text-sm">Password (12+ characters)<PasswordField name="password" minLength="12" maxLength="128" inputClassName="w-full rounded-lg border p-3"/></label>{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<button className="w-full rounded-lg bg-indigo-950 p-3 font-semibold text-white">Submit application</button></form>}<p className="mt-5 text-sm"><Link className="text-indigo-800 underline" to="/login">Back to shared login</Link></p></AuthPanel>;
 }
 
 export function InstitutionRegister() {
   const [message, setMessage] = useState(''), [error, setError] = useState('');
   async function submit(e) {
     e.preventDefault(); setError(''); const form = new FormData(e.currentTarget); const body = Object.fromEntries(form.entries());
-    try { await registerInstitution(body); setMessage('If the registration can be processed, an email verification link will be sent.'); }
+    try { await registerInstitution(body); setMessage('Your registration has been submitted and is awaiting AICTE Official or Super Admin approval. You can sign in after it is approved.'); }
     catch (x) { setError(x.response?.data?.detail || 'Could not submit registration. Check the fields and try again.'); }
   }
-  return <AuthPanel title="Institution registration"><p className="mt-2 text-sm text-slate-600">Verify your email, then wait for AICTE Official or Super Admin approval before signing in.</p>{message ? <p className="mt-5 rounded-lg bg-green-50 p-4 text-green-900" role="status">{message}</p> : <form className="mt-5 grid gap-3 sm:grid-cols-2" onSubmit={submit}>{[['institution_name','Institution name'],['aicte_institution_id','AICTE institution ID'],['contact_name','Contact person'],['email','Email'],['phone','Phone'],['state','State'],['address','Address'],['password','Password (12+ characters)']].map(([name,label])=><label key={name} className="text-sm">{label}<input className="mt-1 w-full rounded-lg border p-2.5" required={name!=='address'} type={name==='email'?'email':name==='password'?'password':'text'} name={name} minLength={name==='password'?12:undefined}/></label>)}{error&&<p role="alert" className="sm:col-span-2 text-red-700">{error}</p>}<button className="rounded-lg bg-indigo-950 p-3 font-semibold text-white sm:col-span-2">Submit registration</button></form>}<p className="mt-5 text-sm"><Link className="text-indigo-800 underline" to="/login">Back to shared login</Link></p></AuthPanel>;
+  return <AuthPanel title="Institution registration"><p className="mt-2 text-sm text-slate-600">Submit your institution registration for AICTE Official or Super Admin approval. You can sign in after it is approved.</p>{message ? <p className="mt-5 rounded-lg bg-green-50 p-4 text-green-900" role="status">{message}</p> : <form className="mt-5 grid gap-3 sm:grid-cols-2" onSubmit={submit}>{[['institution_name','Institution name'],['aicte_institution_id','AICTE institution ID'],['contact_name','Contact person'],['email','Email'],['phone','Phone'],['state','State'],['address','Address'],['password','Password (12+ characters)']].map(([name,label])=><label key={name} className="text-sm">{label}{name==='password' ? <PasswordField name={name} minLength="12" inputClassName="w-full rounded-lg border p-2.5"/> : <input className="mt-1 w-full rounded-lg border p-2.5" required={name!=='address'} type={name==='email'?'email':'text'} name={name}/>}</label>)}{error&&<p role="alert" className="sm:col-span-2 text-red-700">{error}</p>}<button className="rounded-lg bg-indigo-950 p-3 font-semibold text-white sm:col-span-2">Submit registration</button></form>}<p className="mt-5 text-sm"><Link className="text-indigo-800 underline" to="/login">Back to shared login</Link></p></AuthPanel>;
 }
 
 export function VerifyEmailPage() {

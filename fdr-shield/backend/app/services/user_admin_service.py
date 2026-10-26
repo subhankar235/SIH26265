@@ -61,17 +61,20 @@ async def list_pending_registrations(session: AsyncSession, role: str, page, *, 
         raise ValueError('Only Institution and AICTE Official applications are reviewable.')
     stmt = select(User).where(User.role == role)
     if include_decided:
-        stmt = stmt.where(User.created_by.is_(None), User.email_verified_at.is_not(None))
+        stmt = stmt.where(User.created_by.is_(None))
     else:
-        stmt = stmt.where(User.status == AccountStatus.PENDING_APPROVAL.value)
+        stmt = stmt.where(User.status.in_([
+            AccountStatus.PENDING_APPROVAL.value,
+            AccountStatus.PENDING_EMAIL_VERIFY.value,
+        ]))
     stmt = stmt.order_by(User.created_at, User.id)
     return list((await session.scalars(stmt.offset(page.skip).limit(page.limit))).all())
 
 
 async def list_institution_registration_history(session: AsyncSession, page) -> list[User]:
-    """Return publicly submitted, email-verified Institution applications for Super Admin oversight."""
+    """Return public Institution applications for Super Admin oversight."""
     stmt = select(User).where(User.role == Role.INSTITUTION.value,
-        User.created_by.is_(None), User.email_verified_at.is_not(None)).order_by(User.created_at.desc(), User.id.desc())
+        User.created_by.is_(None)).order_by(User.created_at.desc(), User.id.desc())
     return list((await session.scalars(stmt.offset(page.skip).limit(page.limit))).all())
 
 
@@ -174,12 +177,15 @@ async def decide_registration(session: AsyncSession, user_id: int, approved: boo
             raise PermissionDenied('Only a Super Admin may override an application decision.')
         if target.role not in {Role.INSTITUTION.value, Role.AICTE_OFFICIAL.value}:
             raise InvalidStateTransition('Only public applications can be overridden.')
-        if target.created_by is not None or target.email_verified_at is None:
-            raise InvalidStateTransition('Only a verified public application may be overridden.')
+        if target.created_by is not None:
+            raise InvalidStateTransition('Only a public application may be overridden.')
         if target.status not in {AccountStatus.ACTIVE.value, AccountStatus.REJECTED.value, AccountStatus.DISABLED.value,
                                  AccountStatus.PENDING_APPROVAL.value}:
             raise InvalidStateTransition('Only a previously reviewed application can be overridden.')
-    elif target.status != AccountStatus.PENDING_APPROVAL.value:
+    elif target.status not in {
+        AccountStatus.PENDING_APPROVAL.value,
+        AccountStatus.PENDING_EMAIL_VERIFY.value,
+    }:
         raise NotFound('Pending registration not found.')
 
     institution = await session.get(Institution, target.institution_id) if target.role == Role.INSTITUTION.value else None
