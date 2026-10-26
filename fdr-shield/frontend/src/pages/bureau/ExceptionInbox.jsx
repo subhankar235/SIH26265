@@ -2,15 +2,164 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { client } from '../../api/client';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
+import { EmptyState,ErrorState,LoadingState,LiveStatus,useToast } from '../../components/common/PageStates';
 
-export default function ExceptionInbox(){
-  const [reason,setReason]=useState(''),qc=useQueryClient();
-  useEffect(()=>{const api=import.meta.env.VITE_API_URL||'/api/v1';const stream=new EventSource(`${api}/workflows/exceptions/stream`,{withCredentials:true});const refresh=()=>qc.invalidateQueries({queryKey:['official-exceptions']});['exception.created','EXCEPTION_CLAIMED','EXCEPTION_RESOLVED','OFFICIAL_ESCALATED_EXCEPTION','CORRECTION_SLA_EXPIRED'].forEach(type=>stream.addEventListener(type,refresh));return()=>stream.close();},[qc]);
-  const query=useQuery({queryKey:['official-exceptions'],queryFn:()=>client.get('/workflows/exceptions',{params:{status:'open'}}).then(r=>r.data),refetchInterval:10000});
-  const claim=useMutation({mutationFn:id=>client.post(`/workflows/exceptions/${id}/claim`,{reason:reason||'Official is reviewing the exception.'}),onSuccess:()=>qc.invalidateQueries({queryKey:['official-exceptions']})});
-  const decide=useMutation({mutationFn:({id,decision,rationale})=>client.post(`/workflows/exceptions/${id}/decision`,{decision,rationale,idempotency_key:crypto.randomUUID()}),onSuccess:()=>qc.invalidateQueries({queryKey:['official-exceptions']})});
-  return <section><p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">AICTE Official</p><h1 className="mb-2 mt-1 text-3xl font-bold">Exception inbox</h1><p className="mb-6 text-slate-600">Review validation discrepancies and workflow exceptions. Recommendations require an official decision.</p>
-    {query.isLoading?<p>Loading exceptions…</p>:query.isError?<p role="alert" className="text-red-700">Could not load the exception inbox.</p>:!query.data.length?<p className="rounded-xl border bg-white p-8 text-slate-600">No open exceptions.</p>:<div className="space-y-4">{query.data.map(item=><article className="rounded-xl border bg-white p-5" key={item.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase text-amber-800">Priority {item.priority} · {item.reason_code.replaceAll('_',' ')}</p><h2 className="mt-1 text-lg font-semibold">{item.fdr_number}</h2><p className="text-sm text-slate-500">Due {item.due_at?new Date(item.due_at).toLocaleString():'Not specified'}</p></div><Link className="text-indigo-800 underline" to={`/official/workflows/${item.workflow_id}`}>Open workflow</Link></div><p className="mt-3 text-sm">{item.recommended_action}</p><p className="mt-2 text-xs text-slate-500">Evidence references: {JSON.stringify(item.evidence_refs)}</p><label className="mt-4 block text-sm">Decision rationale<textarea className="mt-1 w-full rounded border p-2" minLength="4" value={reason} onChange={e=>setReason(e.target.value)} placeholder="Record why you are taking this action"/></label><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>claim.mutate(item.id)} className="rounded border px-3 py-2">Claim</button><button onClick={()=>decide.mutate({id:item.id,decision:'request_correction',rationale:reason})} disabled={reason.trim().length<4} className="rounded bg-amber-100 px-3 py-2 disabled:opacity-50">Request correction</button><button onClick={()=>decide.mutate({id:item.id,decision:'approve',rationale:reason})} disabled={reason.trim().length<4} className="rounded bg-green-100 px-3 py-2 disabled:opacity-50">Approve</button><button onClick={()=>decide.mutate({id:item.id,decision:'reject',rationale:reason})} disabled={reason.trim().length<4} className="rounded bg-red-100 px-3 py-2 disabled:opacity-50">Reject</button><button onClick={()=>decide.mutate({id:item.id,decision:'escalate',rationale:reason})} disabled={reason.trim().length<4} className="rounded border px-3 py-2 disabled:opacity-50">Escalate</button></div></article>)}</div>}
-    {(claim.isError||decide.isError)&&<p role="alert" className="mt-4 text-red-700">Action was rejected or the case changed; refresh and review the current case state.</p>}
-  </section>;
+export default function ExceptionInbox() {
+  const [reason, setReason] = useState('');
+  const [sseActive, setSseActive] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
+  const qc = useQueryClient();
+  const toast=useToast();
+
+  useEffect(() => {
+    const api = import.meta.env.VITE_API_URL || '/api/v1';
+    const stream = new EventSource(`${api}/workflows/exceptions/stream`, { withCredentials: true });
+    const refresh = () => qc.invalidateQueries({ queryKey: ['official-exceptions'] });
+
+    stream.onopen = () => {
+      setSseActive(true);
+      refresh();
+    };
+
+    stream.onmessage = refresh;
+
+    const eventTypes = [
+      'exception.created', 'EXCEPTION_CLAIMED', 'EXCEPTION_RESOLVED',
+      'OFFICIAL_ESCALATED_EXCEPTION', 'CORRECTION_SLA_EXPIRED',
+      'state.changed', 'node.failed'
+    ];
+    eventTypes.forEach((type) => stream.addEventListener(type, refresh));
+
+    stream.onerror = () => {
+      // Phase 8.5: Fallback to polling if SSE is blocked
+      setSseActive(false);
+    };
+
+    return () => stream.close();
+  }, [qc]);
+
+  // Phase 8.5: Fallback polling every 5s if SSE blocked; 20s if SSE connected
+  const query = useQuery({
+    queryKey: ['official-exceptions'],
+    queryFn: () => client.get('/workflows/exceptions', { params: { status: 'open' } }).then((r) => r.data),
+    refetchInterval: sseActive ? 20000 : 5000,
+  });
+
+  const claim = useMutation({
+    mutationFn: (id) =>
+      client.post(`/workflows/exceptions/${id}/claim`, {
+        reason: reason || 'Official is reviewing the exception.',
+        idempotency_key: crypto.randomUUID(),
+      }),
+    onSuccess: () => {toast('Exception claimed.');qc.invalidateQueries({ queryKey: ['official-exceptions'] });},
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ id, decision, rationale }) =>
+      client.post(`/workflows/exceptions/${id}/decision`, {
+        decision,
+        rationale,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    onSuccess: () => {toast('Exception decision recorded.');qc.invalidateQueries({ queryKey: ['official-exceptions'] });},
+  });
+
+  return (
+    <section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">AICTE Official</p>
+          <h1 className="mb-2 mt-1 text-3xl font-bold">Exception inbox</h1>
+        </div>
+        <LiveStatus active={sseActive}/><span
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+            sseActive ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+          }`}
+        >
+          {sseActive ? '● Live Updates (SSE)' : '○ Polling Fallback (5s)'}
+        </span>
+      </div>
+
+      <p className="mb-6 text-slate-600">
+        Review validation discrepancies and workflow exceptions. Recommendations require an official decision.
+      </p>
+
+      {query.isLoading ? (
+        <LoadingState label="Loading exceptions"/>
+      ) : query.isError ? (
+        <ErrorState error={query.error} onRetry={()=>query.refetch()} label="Could not load the exception inbox"/>
+      ) : !query.data.length ? (
+        <EmptyState title="No open exceptions">New workflow exceptions will appear here with their due date and recommended response.</EmptyState>
+      ) : (
+        <div className="space-y-4">
+          {query.data.map((item) => (
+            <article className="rounded-xl border bg-white p-5" key={item.id}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-amber-800">
+                    Priority {item.priority} · {item.reason_code.replaceAll('_', ' ')}
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold">{item.fdr_number}</h2>
+                  <p className="text-sm text-slate-500">
+                    Due {item.due_at ? new Date(item.due_at).toLocaleString() : 'Not specified'}
+                  </p>
+                </div>
+                <Link className="text-indigo-800 underline" to={`/official/workflows/${item.workflow_id}`}>
+                  Open workflow
+                </Link>
+              </div>
+              <p className="mt-3 text-sm">{item.recommended_action}</p>
+              <p className="mt-2 text-xs text-slate-500">Evidence references: {JSON.stringify(item.evidence_refs)}</p>
+              <label className="mt-4 block text-sm">
+                Decision rationale
+                <textarea
+                  className="mt-1 w-full rounded border p-2 text-sm"
+                  minLength="4"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Record why you are taking this action"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button disabled={claim.isPending} onClick={() => setPendingAction({title:'Claim exception',message:`Assign exception ${item.id} to your account for review.`,run:()=>claim.mutate(item.id)})} className="rounded border px-3 py-2 text-sm disabled:opacity-50">
+                  Claim
+                </button>
+                <button
+                  onClick={() => setPendingAction({title:'Request institution correction',message:`Request correction for ${item.fdr_number}. This records an official decision and notifies the institution.`,run:()=>decide.mutate({ id: item.id, decision: 'request_correction', rationale: reason })})}
+                  disabled={reason.trim().length < 4}
+                  className="rounded bg-amber-100 px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  Request correction
+                </button>
+                <button
+                  onClick={() => setPendingAction({title:'Approve exception',message:`Approve the recommended case path for ${item.fdr_number}. This is a human decision recorded in the audit trail.`,run:()=>decide.mutate({ id: item.id, decision: 'approve', rationale: reason })})}
+                  disabled={reason.trim().length < 4}
+                  className="rounded bg-green-100 px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => setPendingAction({title:'Reject exception',message:`Reject this exception for ${item.fdr_number}; record the rationale for the case file.`,run:()=>decide.mutate({ id: item.id, decision: 'reject', rationale: reason })})}
+                  disabled={reason.trim().length < 4}
+                  className="rounded bg-red-100 px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  Reject
+                </button>
+                <button
+                  onClick={() => setPendingAction({title:'Escalate exception',message:`Escalate ${item.fdr_number} for higher-level official review.`,run:()=>decide.mutate({ id: item.id, decision: 'escalate', rationale: reason })})}
+                  disabled={reason.trim().length < 4}
+                  className="rounded border px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  Escalate
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {(claim.isError || decide.isError) && <ErrorState error={claim.error||decide.error} label="Action was rejected or the case changed"/>}
+      <ConfirmDialog open={Boolean(pendingAction)} title={pendingAction?.title} message={pendingAction?.message} onCancel={()=>setPendingAction(null)} onConfirm={()=>{const run=pendingAction?.run;setPendingAction(null);run?.()}}/>
+    </section>
+  );
 }

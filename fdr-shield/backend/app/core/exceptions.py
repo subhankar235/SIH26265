@@ -7,6 +7,9 @@ from fastapi.exceptions import RequestValidationError
 class AuthError(Exception): ...
 
 
+class AccountStatusError(Exception): ...
+
+
 class RateLimitError(Exception): ...
 
 
@@ -28,14 +31,22 @@ def register_exception_handlers(app: FastAPI) -> None:
             if error is AuthError:
                 return JSONResponse(status_code=code, content={'error': {'code': 'INVALID_CREDENTIALS', 'message': str(exc)}})
             if error is RateLimitError:
-                return JSONResponse(status_code=code, content={'error': {'code': 'RATE_LIMITED', 'message': str(exc)}})
+                return JSONResponse(status_code=code, content={'error': {'code': 'RATE_LIMITED', 'message': str(exc),
+                    'details':{},'request_id':getattr(request.state,'request_id',None)}})
             if error is InvalidStateTransition:
                 message=str(exc)
                 error_code=next((candidate for candidate in ('INSTANCE_BUSY','SIDE_EFFECT_CONFIRMATION_REQUIRED','REPLAY_NOT_ALLOWED') if message.startswith(candidate)), 'ILLEGAL_TRANSITION')
                 return JSONResponse(status_code=code,content={'error':{'code':error_code,'message':message,
                     'details':{},'request_id':getattr(request.state,'request_id',None)}})
-            return JSONResponse(status_code=code,content={'error':error.__name__,'detail':str(exc)})
+            return JSONResponse(status_code=code,content={'error':error.__name__,'detail':str(exc),
+                'request_id':getattr(request.state,'request_id',None)})
         app.add_exception_handler(error,handler)
+
+    async def account_status_handler(request, exc: AccountStatusError):
+        return JSONResponse(status_code=403, content={'error': {
+            'code': 'ACCOUNT_STATUS', 'message': str(exc),
+            'request_id': getattr(request.state, 'request_id', None)}})
+    app.add_exception_handler(AccountStatusError, account_status_handler)
 
     async def http_error_handler(request, exc: HTTPException):
         codes={401:'UNAUTHENTICATED',403:'FORBIDDEN',404:'NOT_FOUND',409:'ILLEGAL_TRANSITION',

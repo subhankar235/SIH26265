@@ -7,6 +7,8 @@ class Role(str, Enum):
     INSTITUTION = 'institution'
     AICTE_OFFICIAL = 'aicte_official'
     ADMIN = 'admin'
+    # Compatibility alias: existing rows and tokens store `admin` as Super Admin.
+    SUPER_ADMIN = 'admin'
 
 
 class AccountStatus(str, Enum):
@@ -15,6 +17,8 @@ class AccountStatus(str, Enum):
     PENDING_APPROVAL = 'pending_approval'
     ACTIVE = 'active'
     LOCKED = 'locked'
+    SUSPENDED = 'suspended'
+    REJECTED = 'rejected'
     DISABLED = 'disabled'
 
 

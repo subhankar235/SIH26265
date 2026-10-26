@@ -128,3 +128,14 @@ def test_engine_selection_uses_ocr_engine_environment(monkeypatch):
     from app.integrations.ocr.easyocr_engine import EasyOcrEngine
     assert isinstance(get_engine(),EasyOcrEngine)
     get_engine.cache_clear();settings_factory.cache_clear()
+
+
+def test_disabled_ocr_does_not_call_a_provider_and_returns_manual_entry_fields(monkeypatch):
+    get_engine.cache_clear()
+    from app.core.config import get_settings as settings_factory
+    settings_factory.cache_clear()
+    monkeypatch.setenv('OCR_ENGINE','disabled')
+    result=asyncio.run(ocr_service.extract_fdr_fields(jpeg(),'image/jpeg'))
+    assert result.confidence==0
+    assert all(getattr(result,key) is None for key in FIELDS)
+    get_engine.cache_clear();settings_factory.cache_clear()

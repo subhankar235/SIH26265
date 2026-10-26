@@ -10,3 +10,5 @@ from .auth_records import RefreshToken, OneTimeToken, LoginAttempt
 from .workflow import (WorkflowInstance, WorkflowNodeExecution, WorkflowEvent, WorkflowCheckpoint,
     OutboxEvent, ApprovalRecord, ExceptionItem, CorrectionRequest, AutomationRule,
     AutomationRuleVersion, CommandExecution, NotificationDeliveryAttempt, VerificationRun)
+from .audit_log import AuditChainHead
+from .ml import MLModelVersion, MLDemoSample, MLPrediction, MLOperationsSnapshot

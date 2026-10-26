@@ -82,9 +82,9 @@ One file per domain; fill Pydantic fields listed in each `# TODO`. Use `model_co
 | `audit_service` | append-only `record`, `query_logs` | |
 
 ### integrations/
-`storage_client` (boto3/MinIO or local folder), `email_client` (aiosmtplib), `telegram_client` (httpx), `whatsapp_mock`, `digilocker_mock`, `ocr/base.py`, `ocr/ollama_vision_engine.py` (default), optional `ocr/easyocr_engine.py` and `ocr/tesseract_engine.py`, `ocr/cnn_engine.py` (future adapter), `templates/maturity_alert.html`.
+`storage_client` (boto3/MinIO or local folder), `email_client` (aiosmtplib), `telegram_client` (httpx), `whatsapp_mock`, `digilocker_mock`, `ocr/base.py`, `ocr/ollama_vision_engine.py` (optional), optional `ocr/easyocr_engine.py` and `ocr/tesseract_engine.py`, `ocr/cnn_engine.py` (future adapter), `templates/maturity_alert.html`.
 
-OCR uses the `FdrExtractor` protocol: `async extract(pages: list[bytes]) -> dict` with six nullable fields. `get_engine()` selects `OCR_ENGINE`. `ollama_vision` is the default, consumes at most two pages, and has no ML package dependency. For optional offline OCR only, install `requirements-ml.txt`; both legacy engines load their packages inside adapter functions. The CNN adapter is reserved for future implementation and raises a clear configuration error if selected.
+OCR uses the `FdrExtractor` protocol: `async extract(pages: list[bytes]) -> dict` with six nullable fields. Bare Settings default to `OCR_ENGINE=disabled` and return null values for manual entry; Compose selects `ollama_vision` at Ollama Cloud. For offline OCR, install `requirements-ml.txt`; both legacy engines load their packages inside adapter functions. The CNN adapter is reserved for future implementation and raises a clear configuration error if selected. Provider errors preserve an unverified record and allow manual review.
 
 ### workers/
 | File | Build |
@@ -97,7 +97,9 @@ Celery tasks are sync entry points: wrap async service calls with `asyncio.run(.
 ### workflow state foundation
 `services/workflow_state_service.py` maintains the lifecycle/status projection, creates workflow instances for new cases and appends status events/outbox intents. `services/outbox_service.py` dispatches due jobs and notification intents. `workflows/definition.py`, `workflows/transitions.py` and `workers/tasks_workflow.py` execute the persisted extract/validate/route nodes, with worker leases, node attempts, checkpoints and correction/official wait states. `scripts/backfill_workflows.py` idempotently imports legacy state, document versions, verification snapshots and auditable human decisions. Imported executions are marked `not_started`; historical node attempts cannot be reconstructed.
 
-`api/v1/workflows.py` exposes case/node/event/checkpoint reads, SSE, exception inbox, approval, claim, pause/resume, retry/replay/version and comparison endpoints. `api/v1/commands.py` provides a typed allowlisted command plan/confirm/cancel/history/stream flow; its current interpreter is deterministic until a separately approved LLM provider is configured. Official pages include `WorkflowControlRoom`, `WorkflowExecution`, `ExceptionInbox`, and `CommandCenter`.
+`api/v1/workflows.py` exposes case/node/event/checkpoint reads, SSE, exception inbox, approval, claim, pause/resume, retry/replay/version and comparison endpoints. `api/v1/commands.py` provides a typed allowlisted command plan/confirm/cancel/history/stream flow. `COMMAND_LLM_ENABLED=false` by default. When explicitly configured, the Command Center uses an OpenAI-compatible LLM for structured intent parsing; missing/malformed/unavailable provider output falls back to the deterministic parser. The institution assistant similarly falls back to its deterministic response. All generated output remains constrained by server allowlists, scoped data, role checks and confirmation. Official pages include `WorkflowControlRoom`, `WorkflowExecution`, `ExceptionInbox`, and `CommandCenter`.
+
+Public Institution and AICTE Official applications verify email before entering approval queues. AICTE Officials decide Institution applications; the Super Admin (stored role `admin` for backward compatibility) approves/rejects Official applications, may decide Institution applications directly, and can audit-log overrides of verified public-application decisions. The one-time setup page at `/super-admin/setup` posts to `/api/v1/auth/register/super-admin`; it requires `SUPER_ADMIN_SETUP_SECRET` in the backend environment, stores only an Argon2id password hash, and uses the same PostgreSQL advisory/SQLite immediate lock as the CLI bootstrap. It closes permanently after a Super Admin row is created; no additional public Super Admin signup is available.
 
 ### mock_bank_api/ (DEMO, separate service)
 `main.py` mounts `banks/sbi.py`, `pnb.py`, `hdfc.py`; `store.py` loads `data/seed_fdrs.json`. Each bank may return slightly different field names; `bank_verification_service` normalizes them to `BankVerifyResponse`. **Never call real bank APIs.**
@@ -117,6 +119,22 @@ Celery tasks are sync entry points: wrap async service calls with `asyncio.run(.
 | `pages/institution` | `InstitutionDashboard`, `UploadFdr`, `MyFdrs`, `RefundClaim` |
 | `pages/bureau` / `pages/admin` | Official scrutiny pages and Admin account, registration and institution screens |
 | `routes/AppRoutes.jsx` | route table in the comment; wrap with `RoleGuard` |
+
+### Phase 12 role-based UI routes
+- Institution portal: `/institution`, `/institution/fdrs/new`, `/institution/fdrs`, `/institution/fdrs/:id`, `/institution/renewals`, `/institution/releases`, `/institution/notifications`; the assistant drawer is available across institution routes.
+- Official portal: `/official/queue`, `/official/review/:id`, `/official/control-room`, `/official/workflows/:id`, `/official/exceptions`, `/official/approvals`, `/official/command`, `/official/audit`.
+- Admin portal: `/admin/users`, `/admin/institutions`, `/admin/roles`, `/admin/dashboard`, `/admin/rules`, `/admin/alerts`, `/admin/jobs`, `/admin/health`, `/admin/audit`, `/admin/ops-agent`.
+- Shared UI states include retryable errors with request IDs, loading skeletons, guided empty states, accessible confirmation dialogs, status icons/text and success toasts. Workflow and exception views use SSE with polling fallback; data endpoints without an SSE feed poll on an interval. Institution notification read markers are browser-local because notification records do not have a user read-state column.
+
+### Phase 13 data-dependent ML and Phase 14 hardening
+- Run Gate 0 from the admin ML governance page/API before any trainer work. Real training rows require explicit `is_synthetic=false`; legacy `NULL` provenance is excluded. Synthetic samples are isolated in `ml_demo_samples`, always labeled, and cannot enter Gate 0 hashes or real metrics.
+- Gate plans specify target, feature version, missing policy, data minima, evaluation metrics, acceptance thresholds and deterministic fallback. No training dependency/model is currently shipped; gates only record blocked/eligible-for-review states. Eligibility does not enable authorization-affecting inference.
+- Deterministic inference stores only advisory `ml_predictions`; all rows include origin and predictor metadata. Periodic ops snapshots are labeled synthetic in dev/test; weekly audit export validates the SHA-256 chain before writing to private object storage.
+- `CLAMAV_HOST` enables pre-storage ClamAV INSTREAM scanning. If configured but unavailable, upload fails closed. Without it, normal MIME/magic/size checks remain and no AV scan is claimed.
+- Redis rate limits guard OCR preview, command and assistant endpoints; a bounded per-worker fallback applies on Redis failure. Request IDs are sanitized, carried into audit records and structured HTTP logs; do not add prompt/document contents to logs.
+- Compose targets Ollama Cloud for OCR only; add `OLLAMA_API_KEY` to `backend/.env`. Agent LLM calls use separate `COMMAND_LLM_ENABLED`, `COMMAND_LLM_API_URL`, `COMMAND_LLM_MODEL`, and `COMMAND_LLM_API_KEY` settings and remain disabled until configured. Compose applies the private `.env` override over the checked-in example. Provider outages preserve deterministic fallbacks; no model can directly execute tools or bypass confirmation.
+- MinIO uploads use container `S3_ENDPOINT`; generated presigned document links use browser-reachable `S3_PUBLIC_ENDPOINT` so a browser never receives the Compose-only `minio` hostname.
+- PostgreSQL backups can be created with `python scripts/postgres_backup.py backup <private-path.dump>` and restore-tested only against a separate disposable database using `RESTORE_DATABASE_URL=<disposable-url> python scripts/postgres_backup.py verify-restore <path>`. Credentials are read from the environment, not argv; the helper verifies SHA-256 and migration/audit/FDR counts, does not delete backups, and requires deployment-owned retention, encryption and offsite policy.
 
 ## 4. How modules communicate
 
@@ -153,7 +171,7 @@ Dashboard: BureauDashboard -> useBureauDashboard -> /dashboard/bureau
 | Anything that mutates state -> `audit_service.record` | `(user_id, entity, entity_id, action, ip, delta{field:[old,new]})` |
 
 ### 4.3 Auth flow
-Role login page -> `/auth/login/{portal}` -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Backend checks active account status and `require_roles` on every protected request.
+One shared login page at `/login` -> `POST /api/v1/auth/login` -> backend derives role from the matched user row -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Legacy role-specific login URLs redirect to `/login`; protected APIs independently check active account status and `require_roles`.
 
 ## 5. Suggested build order (hackathon, 3 days)
 **Day 1 (skeleton that runs):** `core/*` -> `models` + migration -> `auth` router -> `seed.py` -> frontend `Login`, `authStore`, `RoleGuard`, `Layout`.

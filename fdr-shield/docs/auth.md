@@ -11,7 +11,7 @@
 |---|---|
 | Auth type | Manual: email/username + password (no third-party login) |
 | Roles | `INSTITUTION`, `AICTE_OFFICIAL`, `ADMIN` (exactly 3) |
-| Login pages | 3 separate portals: `/institution/login`, `/official/login`, `/admin/login` |
+| Login page | One shared login at `/login`; redirects by the database-verified role |
 | Session | Short-lived access JWT + rotating refresh token, both in **httpOnly cookies** |
 | Password hashing | **argon2id** (fallback bcrypt cost ≥ 12) |
 | Authorization | Enforced on the **backend** for every request; frontend guards are only cosmetic |
@@ -250,7 +250,7 @@ Notes: registration returns the same 202 message even if the email exists (preve
 **Rule:** agents/LLM tools must never call these endpoints (matches the main guide's rule that agents cannot change permissions).
 
 ### Step 4.10 — Seed script
-`python -m app.cli create_admin` reads `INITIAL_ADMIN_EMAIL/PASSWORD`, creates the Admin if none exists, sets `must_change_password=true`. Idempotent. Document: remove the env password after first run.
+`python -m scripts.create_admin` reads `INITIAL_ADMIN_EMAIL/PASSWORD`, creates the first Super Admin if none exists, sets `must_change_password=true`, and serializes concurrent bootstrap attempts. The first account may alternatively be created at `/super-admin/setup` when `SUPER_ADMIN_SETUP_SECRET` is configured in the backend environment. Both paths share the bootstrap lock; the page checks for any existing Admin row and is permanently closed afterward. Remove the initial password and setup secret from the environment after setup.
 
 ### Step 4.11 — Rate limiting & lockout
 - Per IP: e.g., 20 login attempts / 10 min. Per email: 10 / 10 min. Registration & forgot-password: 5 / hour / IP. (Proposed values — tune.)

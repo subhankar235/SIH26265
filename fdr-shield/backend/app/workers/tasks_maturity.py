@@ -1,9 +1,10 @@
 """Escalation scheduler (USP 2)."""
 
 from .celery_app import celery_app, run_async_task
-from datetime import date
+from datetime import timedelta
 from sqlalchemy import select
 from app.core.database import SessionLocal
+from app.core.clock import business_today
 from app.models.fdr import FDR
 from app.core.enums import FDRStatus
 from app.services import notification_service
@@ -28,10 +29,11 @@ def send_alert_task(fdr_id: int, stage: str) -> None:
 
 async def _scan():
     async with SessionLocal() as session:
+        today=business_today()
         relevant_statuses=[FDRStatus.VERIFIED.value,FDRStatus.SUBMITTED.value,FDRStatus.UNDER_SCRUTINY.value,FDRStatus.MISMATCH.value,FDRStatus.EXPIRED.value]
-        rows=(await session.scalars(select(FDR).where(FDR.status.in_(relevant_statuses),FDR.maturity_date<=date.fromordinal(date.today().toordinal()+90)).order_by(FDR.maturity_date))).all()
+        rows=(await session.scalars(select(FDR).where(FDR.status.in_(relevant_statuses),FDR.maturity_date<=today+timedelta(days=90)).order_by(FDR.maturity_date))).all()
         for f in rows:
-            days=(f.maturity_date-date.today()).days
+            days=(f.maturity_date-today).days
             if days<0 and f.status not in (FDRStatus.EXPIRED.value,FDRStatus.RENEWAL_REQUESTED.value,FDRStatus.RELEASED.value):
                 previous=f.status;f.status=FDRStatus.EXPIRED.value
                 await sync_legacy_status(session, f, event_type='FDR_EXPIRED', previous_status=previous)

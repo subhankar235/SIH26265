@@ -30,6 +30,8 @@ async def store_upload(session: AsyncSession, fdr_id: int, doc_type: str, file: 
         'image/png': data.startswith(b'\x89PNG\r\n\x1a\n'),
     }
     if not signatures.get(file.content_type,False): raise HTTPException(415,'File contents do not match the declared file type')
+    from app.integrations.upload_scanner import scan_upload
+    scan_result=await scan_upload(data)
     existing = list((await session.scalars(select(Document).where(
         Document.fdr_id == fdr_id, Document.doc_type == doc_type).order_by(Document.id))).all())
     previous = existing[-1] if existing else None
@@ -44,7 +46,8 @@ async def store_upload(session: AsyncSession, fdr_id: int, doc_type: str, file: 
         supersedes_document_id=previous.id if previous else None,uploaded_at=datetime.now(timezone.utc))
     session.add(doc);await session.flush()
     await record(session,user_id,'document',doc.id,'uploaded','',
-        {'fdr_id':[None,fdr_id],'doc_type':[None,doc_type],'version_no':[None,version_no],'sha256':[None,digest]})
+        {'fdr_id':[None,fdr_id],'doc_type':[None,doc_type],'version_no':[None,version_no],'sha256':[None,digest],
+         'malware_scan':[None,scan_result]})
     if doc_type == 'fdr_scan':
         workflow = await session.scalar(select(WorkflowInstance).where(
             WorkflowInstance.fdr_id == fdr_id).order_by(WorkflowInstance.execution_version.desc()).limit(1))

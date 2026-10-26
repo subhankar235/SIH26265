@@ -24,7 +24,7 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use((response) => response, async (error) => {
   const request = error.config;
   const url = request?.url || '';
-  const publicRequest = /\/auth\/(login|mfa\/verify|register|verify-email|accept-invite|forgot-password|reset-password)/.test(url);
+  const publicRequest = /\/auth\/(?:login(?:\/|$)|mfa\/verify(?:\/|$)|register(?:\/|$)|verify-email(?:\/|$)|accept-invite(?:\/|$)|forgot-password(?:\/|$)|reset-password(?:\/|$))/.test(url);
   if (error.response?.status !== 401 || !request || request._retried || publicRequest || url.includes('/auth/refresh')) {
     return Promise.reject(error);
   }

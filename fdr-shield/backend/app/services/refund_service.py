@@ -17,12 +17,13 @@ import html
 from app.models.institution import Institution
 from app.models.notification import Notification
 from app.services.outbox_service import enqueue as enqueue_outbox
+from app.core.clock import business_today
 
 
 async def create_refund(session: AsyncSession, data: RefundCreate, user_id: int, institution_id: int | None = None) -> RefundRequest:
     # Eligibility check then insert
-    f=await session.get(FDR,data.fdr_id)
-    if not f or (institution_id is not None and f.institution_id != institution_id) or f.status!=FDRStatus.VERIFIED.value or f.maturity_date>date.today():raise InvalidStateTransition('Refund requires a verified, matured FDR')
+    f=await session.scalar(select(FDR).where(FDR.id==data.fdr_id).with_for_update())
+    if not f or (institution_id is not None and f.institution_id != institution_id) or f.status!=FDRStatus.VERIFIED.value or f.maturity_date>business_today():raise InvalidStateTransition('Refund requires a verified, matured FDR')
     r=RefundRequest(fdr_id=f.id,requested_by=user_id,status='pending',remarks=data.reason);session.add(r);await session.flush()
     previous_status=f.status;f.status=FDRStatus.RELEASE_REQUESTED.value
     workflow=await sync_legacy_status(session,f,actor_id=user_id,event_type='RELEASE_REQUESTED',previous_status=previous_status)

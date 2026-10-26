@@ -8,6 +8,7 @@ from app.core.security import hash_password
 from app.models import User
 from app.services.audit_service import record
 from app.services.auth_service import validate_password_strength
+from app.services.super_admin_setup_service import acquire_bootstrap_lock
 
 
 async def main():
@@ -22,6 +23,7 @@ async def main():
         raise SystemExit(str(exc)) from exc
     await init_db()
     async with SessionLocal() as session:
+        await acquire_bootstrap_lock(session)
         existing = await session.scalar(select(User).where(User.email == email))
         if existing:
             if existing.role != Role.ADMIN.value:
@@ -32,7 +34,7 @@ async def main():
         if any_admin:
             raise SystemExit('An Admin already exists. Create additional Admin accounts from the Admin portal.')
         user = User(email=email, full_name='System Administrator', password_hash=hash_password(password),
-            role=Role.ADMIN.value, institution_id=None, status=AccountStatus.ACTIVE.value,
+            role=Role.SUPER_ADMIN.value, institution_id=None, status=AccountStatus.ACTIVE.value,
             is_active=True, must_change_password=True)
         session.add(user)
         await session.flush()

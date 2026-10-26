@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from email_validator import validate_email as _validate_email, EmailNotValidError
 from pydantic import AfterValidator, BaseModel, Field, ConfigDict
 
@@ -38,6 +38,12 @@ class InstitutionRegistrationRequest(BaseModel):
     password: str = Field(min_length=12, max_length=128)
 
 
+class OfficialRegistrationRequest(BaseModel):
+    full_name: str = Field(min_length=2, max_length=255)
+    email: EmailAddress
+    password: str = Field(min_length=12, max_length=128)
+
+
 class TokenBody(BaseModel):
     token: str = Field(min_length=20, max_length=512)
 
@@ -71,6 +77,11 @@ class AdminUserUpdate(BaseModel):
 
 class RegistrationDecision(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
+
+
+class RegistrationDecisionRequest(BaseModel):
+    decision: Literal['approve', 'reject']
+    reason: str = Field(min_length=4, max_length=1000)
 
 
 class AdminUserOut(BaseModel):

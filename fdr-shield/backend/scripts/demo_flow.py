@@ -10,10 +10,9 @@ MAILHOG = os.getenv('MAILHOG_URL', 'http://mailhog:8025')
 
 
 async def login(client: httpx.AsyncClient, email: str) -> dict[str, str]:
-    portal = 'institution' if email.startswith('institution') else 'admin' if email.startswith('admin@') else 'official'
     for attempt in range(45):
         try:
-            response = await client.post(f'/api/v1/auth/login/{portal}', json={'email': email, 'password': 'DemoPass123!'})
+            response = await client.post('/api/v1/auth/login', json={'email': email, 'password': 'DemoPass123!'})
             break
         except httpx.ConnectError:
             if attempt == 44: raise

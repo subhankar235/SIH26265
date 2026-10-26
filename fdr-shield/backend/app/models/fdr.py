@@ -42,6 +42,9 @@ class FDR(Base):
     execution_state: Mapped[str | None] = mapped_column(String(24), nullable=True, default='not_started', index=True)
     authorization_state: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
     verification_level: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+    # NULL denotes legacy rows whose provenance was never recorded; only explicit
+    # false rows may be used as real historical data by ML Gate 0.
+    is_synthetic: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False, index=True)
     trust_badge: Mapped[str]  # TrustBadge
     declared_data: Mapped[dict] = mapped_column(JSON)  # institution self-declaration
     ocr_data: Mapped[dict | None] = mapped_column(JSON)

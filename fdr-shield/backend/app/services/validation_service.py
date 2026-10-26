@@ -8,6 +8,7 @@ from app.models.fdr import FDR
 from app.models.document import Document
 from app.schemas.verification import OcrResult
 from app.schemas.workflow import ExtractedField, ExtractionResult, ValidationDiscrepancy, ValidationResult
+from app.core.clock import business_today
 
 RULE_VERSION = 'fdr-validation-v1'
 REQUIRED_DECLARED = ('fdr_number','bank_name','amount','issue_date','maturity_date','holder')
@@ -86,7 +87,7 @@ async def validate_fdr(session: AsyncSession, fdr: FDR,
                        extraction: ExtractionResult | None = None,
                        *, today: date | None = None) -> ValidationResult:
     """Check declarations, extracted evidence, date/amount rules and duplicate refs."""
-    today = today or date.today()
+    today = today or business_today()
     declared = fdr.declared_data or {}
     extracted = {name: item.value for name,item in (extraction.fields.items() if extraction else [])}
     findings: list[ValidationDiscrepancy] = []

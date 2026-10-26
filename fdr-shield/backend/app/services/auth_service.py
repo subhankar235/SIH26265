@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.enums import AccountStatus, Role
-from app.core.exceptions import AuthError, RateLimitError
+from app.core.exceptions import AccountStatusError, AuthError, RateLimitError
 from app.core.security import (create_access_token, decode_token, dummy_password_verify,
                                hash_password, hash_token, needs_rehash, verify_password,
                                encrypt_mfa_secret, decrypt_mfa_secret,
@@ -18,7 +18,7 @@ from app.core.security import (create_access_token, decode_token, dummy_password
 from app.models.auth_records import LoginAttempt, OneTimeToken, RefreshToken
 from app.models.institution import Institution
 from app.models.user import User
-from app.schemas.auth import InstitutionRegistrationRequest
+from app.schemas.auth import InstitutionRegistrationRequest, OfficialRegistrationRequest
 from app.services.audit_service import record
 from app.integrations.email_client import send_email
 
@@ -81,7 +81,7 @@ async def throttle_public_action(session: AsyncSession, portal: str, email: str,
     await _log_attempt(session, email.lower(), portal, False, 'PUBLIC_ACTION', ip, None)
 
 
-async def login(session: AsyncSession, email: str, password: str, portal: str,
+async def login(session: AsyncSession, email: str, password: str, portal: str | None = None,
                 ip: str | None = None, user_agent: str | None = None) -> dict:
     normalized = email.strip().lower()
     await _check_rate(session, normalized, ip)
@@ -95,11 +95,15 @@ async def login(session: AsyncSession, email: str, password: str, portal: str,
         user.is_active = True
         user.locked_until = None
         user.failed_login_count = 0
-    expected_role = portal
+    valid_roles = {role.value for role in Role}
+    # The shared login path resolves authority only from the matched database row.
+    # `portal` remains an optional compatibility constraint for older API clients.
+    expected_role = portal if portal is not None else (user.role if user and user.role in valid_roles else None)
+    audit_portal = portal or (user.role if user and user.role in valid_roles else 'shared')
     failure_reason = None
     if not user or not good_password:
         failure_reason = 'INVALID_CREDENTIALS'
-    elif user.role != expected_role:
+    elif expected_role is None or user.role != expected_role:
         failure_reason = 'WRONG_PORTAL'
     elif user.status != AccountStatus.ACTIVE.value or not user.is_active:
         failure_reason = 'INACTIVE_ACCOUNT'
@@ -107,6 +111,23 @@ async def login(session: AsyncSession, email: str, password: str, portal: str,
         failure_reason = 'INACTIVE_ACCOUNT'
     elif user.locked_until and _aware(user.locked_until) > now:
         failure_reason = 'ACCOUNT_LOCKED'
+
+    # Explain a blocked state only after both the password and requested portal role
+    # match. Invalid credentials and wrong-portal attempts remain indistinguishable.
+    if user and good_password and user.role == expected_role:
+        status_messages = {
+            AccountStatus.PENDING_EMAIL_VERIFY.value: 'Verify your email before signing in.',
+            AccountStatus.PENDING_APPROVAL.value: 'Your registration is awaiting administrator approval.',
+            AccountStatus.REJECTED.value: 'This application was not approved. Contact a Super Admin for assistance.',
+            AccountStatus.SUSPENDED.value: 'This account is temporarily suspended. Contact a Super Admin for assistance.',
+            AccountStatus.DISABLED.value: 'This account is disabled. Contact a Super Admin for assistance.',
+            AccountStatus.LOCKED.value: 'This account is temporarily locked. Try again later or contact a Super Admin.',
+        }
+        if user.status in status_messages or not user.is_active:
+            await _log_attempt(session, normalized, audit_portal, False, user.status, ip, user_agent)
+            await record(session, user.id, 'auth', user.id, 'LOGIN_BLOCKED_BY_ACCOUNT_STATUS', ip or '',
+                         {'status': [None, user.status], 'role': [None, user.role]})
+            raise AccountStatusError(status_messages.get(user.status, 'This account is inactive. Contact a Super Admin.'))
 
     if failure_reason:
         if user and failure_reason == 'INVALID_CREDENTIALS':
@@ -119,19 +140,19 @@ async def login(session: AsyncSession, email: str, password: str, portal: str,
                              {'status': [AccountStatus.ACTIVE.value, AccountStatus.LOCKED.value]})
                 await send_email(user.email, 'FDR-Shield account temporarily locked',
                     f'<p>Your account is temporarily locked after repeated failed sign-in attempts. Try again after {cfg.lockout_minutes} minutes or contact an administrator.</p>')
-        await _log_attempt(session, normalized, portal, False, failure_reason, ip, user_agent)
+        await _log_attempt(session, normalized, audit_portal, False, failure_reason, ip, user_agent)
         await record(session, user.id if user else None, 'auth', user.id if user else 0,
-            'LOGIN_FAILURE', ip or '', {'portal': [None, portal], 'reason': [None, failure_reason]})
+            'LOGIN_FAILURE', ip or '', {'portal': [None, audit_portal], 'reason': [None, failure_reason]})
         raise AuthError(GENERIC_INVALID)
 
     assert user is not None
     if user.totp_secret or user.mfa_secret_enc:
         if user.password_hash and needs_rehash(user.password_hash):
             user.password_hash = hash_password(password)
-        await _log_attempt(session, normalized, portal, False, 'MFA_REQUIRED', ip, user_agent)
+        await _log_attempt(session, normalized, audit_portal, False, 'MFA_REQUIRED', ip, user_agent)
         return {'mfa_required': True, 'mfa_token': create_access_token(str(user.id), user.role, 5,
-                token_type='mfa', mfa_pending=True, portal=portal)}
-    return await _complete_login(session, user, portal, ip, user_agent, password)
+                token_type='mfa', mfa_pending=True, portal=user.role)}
+    return await _complete_login(session, user, user.role, ip, user_agent, password)
 
 
 async def _complete_login(session: AsyncSession, user: User, portal: str,
@@ -306,6 +327,29 @@ async def register_institution(session: AsyncSession, data: InstitutionRegistrat
     await record(session, user.id, 'user', user.id, 'USER_REGISTERED', ip or '', {'status': [None, user.status]})
 
 
+async def register_official(session: AsyncSession, data: OfficialRegistrationRequest, ip: str | None) -> None:
+    """Public AICTE Official application. It cannot create an active account."""
+    email = str(data.email).lower()
+    if await session.scalar(select(User.id).where(func.lower(User.email) == email)):
+        await _send_registration_ack(email)
+        return
+    validate_password_strength(data.password, email, data.full_name)
+    now = utcnow()
+    user = User(email=email, full_name=data.full_name, password_hash=hash_password(data.password),
+        role=Role.AICTE_OFFICIAL.value, institution_id=None,
+        status=AccountStatus.PENDING_EMAIL_VERIFY.value, is_active=False,
+        created_at=now, updated_at=now)
+    session.add(user)
+    await session.flush()
+    token = await issue_one_time_token(session, user, 'VERIFY_EMAIL', timedelta(hours=24))
+    cfg = get_settings()
+    await send_email(email, 'FDR-Shield AICTE Official application',
+        f'<p>Verify your email to submit your AICTE Official application: '
+        f'<a href="{cfg.frontend_origin}/verify-email?token={token}">Verify email</a>.</p>')
+    await record(session, user.id, 'user', user.id, 'OFFICIAL_APPLICATION_SUBMITTED', ip or '',
+        {'role': [None, Role.AICTE_OFFICIAL.value], 'status': [None, user.status]})
+
+
 async def _send_registration_ack(email: str) -> None:
     cfg = get_settings()
     await send_email(email, 'FDR-Shield registration request',
@@ -349,6 +393,8 @@ async def request_password_reset(session: AsyncSession, email: str) -> None:
 async def reset_password(session: AsyncSession, raw: str, password: str) -> None:
     _, user = await _consume_token(session, raw, 'RESET_PASSWORD')
     if not user: raise AuthError('This link is invalid or expired.')
+    if user.status not in {AccountStatus.ACTIVE.value, AccountStatus.LOCKED.value} or not user.is_active:
+        raise AuthError('This link is invalid or expired.')
     validate_password_strength(password, user.email, user.full_name)
     user.password_hash = hash_password(password)
     user.status = AccountStatus.ACTIVE.value
@@ -356,6 +402,7 @@ async def reset_password(session: AsyncSession, raw: str, password: str) -> None
     user.failed_login_count = 0
     user.locked_until = None
     user.must_change_password = False
+    user.session_version += 1
     await session.execute(update(RefreshToken).where(RefreshToken.user_id == user.id,
         RefreshToken.revoked_at.is_(None)).values(revoked_at=utcnow()))
     await record(session, user.id, 'user', user.id, 'PASSWORD_RESET_COMPLETED', 'system', {})
