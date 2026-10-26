@@ -36,7 +36,7 @@ The Official portal now includes a persisted workflow control room, exception in
 
 ### Optional OCR
 
-Compose sets `OCR_ENGINE=ollama_vision`, `OLLAMA_BASE_URL=https://ollama.com`, and `OLLAMA_MODEL=gemma4:cloud`. Set `OLLAMA_API_KEY` in `backend/.env` for OCR only. Without a working provider/key, OCR safely returns empty fields; enter/review them manually and the record remains unverified. To use offline OCR instead, choose `easyocr` or `tesseract` and install its requirements.
+Compose sets `OCR_ENGINE=ollama_vision`, `OLLAMA_BASE_URL=https://ollama.com`, and `OLLAMA_MODEL=gemma4:31b`. Set `OLLAMA_API_KEY` in `backend/.env` for OCR only. If the provider is unavailable or misconfigured, the preview reports an error and fields can still be entered manually; the record remains unverified. To use offline OCR instead, choose `easyocr` or `tesseract` and install its requirements.
 
 ## Demo accounts
 

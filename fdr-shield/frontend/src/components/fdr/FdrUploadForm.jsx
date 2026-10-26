@@ -15,20 +15,26 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
   const [extracting, setExtracting] = useState(false);
   const [validation, setValidation] = useState('');
   const [extractError, setExtractError] = useState('');
+  const [extractNotice, setExtractNotice] = useState('');
 
   async function extract() {
     if (!file) return setValidation('Choose your FDR scan first.');
     const form = new FormData(); form.append('file', file);
-    setExtracting(true); setExtractError(''); setValidation('');
+    setExtracting(true); setExtractError(''); setExtractNotice(''); setValidation('');
     try {
       const { data } = await client.post('/fdrs/extract-preview', form);
       setValues(data.fields);
       setConfidence(data.confidence);
+      if (!Object.values(data.fields || {}).some(value => value !== null && value !== '')) {
+        setExtractNotice('OCR returned no readable fields. Check the scan is clear, or enter the details manually.');
+      }
       setProvenance(Object.fromEntries(fields.map(([name]) => [name, data.fields[name] ? 'EXTRACTED' : 'DECLARED'])));
       setConfirmed({});
     } catch (e) {
       setExtractError(e.response?.data?.detail || 'Could not extract fields. You may enter them manually.');
+      setExtractNotice('');
       setValues(Object.fromEntries(fields.map(([name]) => [name, ''])));
+      setConfidence({});
       setProvenance(Object.fromEntries(fields.map(([name]) => [name, 'DECLARED'])));
       setConfirmed({});
     } finally { setExtracting(false); }
@@ -53,7 +59,7 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
           setFile(e.target.files?.[0] || null);
           setValues(Object.fromEntries(fields.map(([name]) => [name, ''])));
           setProvenance(Object.fromEntries(fields.map(([name]) => [name, 'DECLARED'])));
-          setConfidence({}); setConfirmed({});
+          setConfidence({}); setConfirmed({}); setExtractError(''); setExtractNotice('');
         }}
         className="mt-1 block w-full rounded-lg border p-3" /></label>
       <button type="button" disabled={!file || extracting || busy} onClick={extract}
@@ -61,6 +67,7 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
         {extracting ? 'Extracting…' : 'Extract and prefill fields'}
       </button>
       {extractError && <p role="status" className="mt-2 text-sm text-amber-800">{extractError}</p>}
+      {extractNotice && <p role="status" className="mt-2 text-sm text-amber-800">{extractNotice}</p>}
     </div>
     {fields.map(([name, label]) => {
       const low = confidence[name] !== undefined && confidence[name] < 0.7;

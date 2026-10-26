@@ -54,7 +54,7 @@ def make_extraction_result(fdr: FDR, document: Document, ocr: OcrResult,
     aliases = {'holder':'holder_name'}
     fields = {}
     source_spans=source_spans or {}
-    for name in ('fdr_number','bank_name','holder','amount','issue_date','maturity_date'):
+    for name in ('fdr_number','bank_name','branch','holder','amount','issue_date','maturity_date'):
         value = getattr(ocr, aliases.get(name, name))
         span = source_spans.get(aliases.get(name,name))
         if span and value is not None:
@@ -134,7 +134,7 @@ async def validate_fdr(session: AsyncSession, fdr: FDR,
 
     # OCR candidates are never promoted to external or human verification. Exact numeric/date
     # fields use typed comparisons; text is normalized only for whitespace/case.
-    for field in ('fdr_number','bank_name','holder','amount','issue_date','maturity_date'):
+    for field in ('fdr_number','bank_name','branch','holder','amount','issue_date','maturity_date'):
         actual = extracted.get('holder_name') if field == 'holder' else extracted.get(field)
         expected = declared.get(field)
         if actual is None:

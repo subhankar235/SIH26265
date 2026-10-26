@@ -53,6 +53,17 @@ describe('FDR-Shield UI smoke tests', () => {
     expect(JSON.parse(onSubmit.mock.calls[0][0].get('field_provenance')).branch).toBe('DECLARED');
   });
 
+  it('explains when OCR completes without recognizing any fields', async () => {
+    client.post.mockResolvedValueOnce({data:{
+      fields:{fdr_number:null,bank_name:null,branch:null,amount:null,issue_date:null,maturity_date:null,holder:null},
+      confidence:{fdr_number:0,bank_name:0,branch:0,amount:0,issue_date:0,maturity_date:0,holder:0},
+    }});
+    render(<FdrUploadForm/>);
+    fireEvent.change(screen.getByLabelText(/FDR scan/),{target:{files:[new File(['scan'],'scan.png',{type:'image/png'})]}});
+    fireEvent.click(screen.getByRole('button',{name:'Extract and prefill fields'}));
+    expect(await screen.findByRole('status')).toHaveTextContent('OCR returned no readable fields');
+  });
+
   it('requires a reason before making a refund decision', () => {
     const onDecide = vi.fn();
     render(<RefundDecisionPanel refund={{id:3}} onDecide={onDecide}/>);

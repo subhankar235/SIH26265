@@ -8,7 +8,7 @@ class DisabledOcrEngine:
     """No-provider OCR mode; lets users enter/review fields manually without a network call."""
 
     async def extract(self, pages: list[bytes]) -> dict:
-        return {key: None for key in ('fdr_number', 'bank_name', 'holder_name', 'amount', 'issue_date', 'maturity_date')}
+        return {key: None for key in ('fdr_number', 'bank_name', 'branch', 'holder_name', 'amount', 'issue_date', 'maturity_date')}
 
 
 @lru_cache(maxsize=1)

@@ -23,6 +23,7 @@ async def extract_fdr_fields(file_bytes: bytes, content_type: str, *, raise_erro
         result = OcrResult(
             fdr_number=_optional_text(values.get('fdr_number')),
             bank_name=_optional_text(values.get('bank_name')),
+            branch=_optional_text(values.get('branch')),
             holder_name=_optional_text(values.get('holder_name')),
             amount=_amount(values.get('amount')),
             issue_date=_parse_date(values.get('issue_date')),
@@ -30,9 +31,9 @@ async def extract_fdr_fields(file_bytes: bytes, content_type: str, *, raise_erro
             confidence=0,
         )
         found = sum(getattr(result, field) is not None for field in (
-            'fdr_number', 'bank_name', 'holder_name', 'amount', 'issue_date', 'maturity_date'
+            'fdr_number', 'bank_name', 'branch', 'holder_name', 'amount', 'issue_date', 'maturity_date'
         ))
-        result.confidence = found / 6
+        result.confidence = found / 7
         return result
     except Exception:
         logger.exception('FDR OCR extraction failed; leaving the record unverified')
@@ -98,17 +99,22 @@ async def parse_fdr_text(raw_text: str) -> OcrResult:
     amount=re.search(r'(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d{1,2})?)',raw_text,re.I)
     dates=re.findall(r'\b(\d{2}[-/]\d{2}[-/]\d{4})\b',raw_text)
     bank=next((name for name in ('SBI','PNB','HDFC') if name.lower() in raw_text.lower()),None)
+    branch_match=re.search(
+        r'(?im)^\s*(?:(?:bank|home|issuing|local)\s+)?branch(?:\s*/\s*office|\s+name)?\s*[:\-]\s*(.+?)\s*$',
+        raw_text,
+    )
     holder_match=re.search(r'(?:holder|in the name of|name of depositor)\s*[:\-]?\s*([^\n\r]+)',raw_text,re.I)
     result=OcrResult(
         fdr_number=number.group(0).upper() if number else None,
         bank_name=bank,
+        branch=_optional_text(branch_match.group(1)) if branch_match else None,
         holder_name=holder_match.group(1).strip() if holder_match else None,
         amount=_amount(amount.group(1)) if amount else None,
         issue_date=_parse_date(dates[0]) if dates else None,
         maturity_date=_parse_date(dates[1]) if len(dates)>1 else None,
         confidence=0,
     )
-    result.confidence=sum(getattr(result,key) is not None for key in ('fdr_number','bank_name','holder_name','amount','issue_date','maturity_date'))/6
+    result.confidence=sum(getattr(result,key) is not None for key in ('fdr_number','bank_name','branch','holder_name','amount','issue_date','maturity_date'))/7
     return result
 
 

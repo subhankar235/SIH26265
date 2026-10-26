@@ -5,7 +5,10 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import httpx
+import pytest
+from fastapi import HTTPException
 from PIL import Image
+from starlette.requests import Request
 
 from app.integrations.ocr import get_engine
 from app.integrations.ocr.ollama_vision_engine import FIELDS, OllamaVisionEngine
@@ -19,14 +22,14 @@ def jpeg(size=(80, 40), color='white'):
 
 def fields(**overrides):
     result={key:None for key in FIELDS}
-    result.update({'fdr_number':'SBI100001','bank_name':'SBI','holder_name':'ABC Institute of Technology','amount':1000000,'issue_date':'2026-03-31','maturity_date':'2027-03-31'})
+    result.update({'fdr_number':'SBI100001','bank_name':'SBI','branch':'Main Branch','holder_name':'ABC Institute of Technology','amount':1000000,'issue_date':'2026-03-31','maturity_date':'2027-03-31'})
     result.update({'format_match':'sbi','format_reason':'Matches the SBI reference layout.'})
     result.update(overrides)
     return result
 
 
 def settings(**overrides):
-    base={'ollama_base_url':'http://ollama.test','ollama_model':'gemma4:cloud','ollama_api_key':'','ollama_timeout':2,
+    base={'ollama_base_url':'http://ollama.test','ollama_model':'gemma4:31b','ollama_api_key':'','ollama_timeout':2,
           'ocr_format_check':True,'ocr_reference_dir':'reference_formats'}
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -42,11 +45,12 @@ def test_ollama_vision_valid_json_and_image_resize(monkeypatch):
     result=asyncio.run(engine.extract([jpeg((1900,1700))]))
     request=seen['request'];body=json.loads(request.content)
     assert result['fdr_number']=='SBI100001'
+    assert result['branch']=='Main Branch'
     assert request.url.path=='/api/chat'
     assert request.headers['authorization']=='Bearer test-key'
     assert body['stream'] is False and body['options']['temperature']==0
     assert set(body['format']['properties'])==set(FIELDS)|{'format_match','format_reason'}
-    assert body['model']=='gemma4:cloud' and len(body['messages'][0]['images'])==4
+    assert body['model']=='gemma4:31b' and len(body['messages'][0]['images'])==4
     assert 'Reference 1: genuine SBI format' in body['messages'][0]['content']
     assert 'Reference 2: genuine HDFC format' in body['messages'][0]['content']
     assert 'Reference 3: genuine PNB format' in body['messages'][0]['content']
@@ -80,7 +84,47 @@ def test_invalid_json_is_retried_once_then_succeeds(monkeypatch):
     assert count['calls']==2 and result['amount']==1000000
 
 
-def test_none_format_match_clears_all_fields(monkeypatch):
+def test_omitted_fields_are_null_and_other_extracted_values_are_kept(monkeypatch, caplog):
+    payload=fields()
+    del payload['bank_name']
+    del payload['maturity_date']
+    calls={'count':0}
+
+    async def handler(request):
+        calls['count']+=1
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+
+    assert calls['count']==1
+    assert result['fdr_number']=='SBI100001'
+    assert result['bank_name']=='State Bank of India'
+    assert result['amount']==1000000
+    assert result['maturity_date'] is None
+    assert 'Ollama OCR response omitted fields' in caplog.text
+
+
+@pytest.mark.parametrize(('raw_amount', 'expected'), [
+    ('₹ 12,34,567.50', '1234567.50'),
+    ('Rs. 1,234,567.50', '1234567.50'),
+    ('INR 25000', '25000'),
+    ('1.5 lakh', None),
+])
+def test_amount_text_is_normalized_without_discarding_other_fields(monkeypatch, raw_amount, expected):
+    payload=fields(amount=raw_amount)
+
+    async def handler(request):
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+
+    assert result['fdr_number']=='SBI100001'
+    assert result['amount']==expected
+
+
+def test_none_format_match_preserves_readable_extracted_fields(monkeypatch):
     from app.integrations.ocr.reference_formats import clear_reference_cache
     clear_reference_cache()
     async def handler(request):
@@ -91,8 +135,27 @@ def test_none_format_match_clears_all_fields(monkeypatch):
         return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
     result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
-    assert set(result)==set(FIELDS) and all(value is None for value in result.values())
+    assert result['fdr_number']=='SBI100001'
+    assert result['amount']==1000000
+    assert set(result)==set(FIELDS)
     clear_reference_cache()
+
+
+@pytest.mark.parametrize(('format_match', 'expected_bank'), [
+    ('sbi', 'State Bank of India'),
+    ('hdfc', 'HDFC Bank'),
+    ('pnb', 'Punjab National Bank'),
+])
+def test_missing_bank_name_uses_matched_bank_format(monkeypatch, format_match, expected_bank):
+    payload=fields(bank_name=None,format_match=format_match)
+
+    async def handler(request):
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+
+    assert result['bank_name']==expected_bank
 
 
 def test_negative_sample_short_circuits_model(monkeypatch):
@@ -161,6 +224,45 @@ def test_http_error_returns_empty_result(monkeypatch):
     assert isinstance(result,OcrResult) and result.confidence==0 and result.fdr_number is None
 
 
+def test_extract_preview_reports_provider_failures(monkeypatch):
+    from app.api.v1.fdrs import extract_preview
+
+    async def allow_rate_limit(*args, **kwargs):
+        return None
+
+    async def allow_upload_scan(data):
+        return {}
+
+    async def fail_extraction(*args, **kwargs):
+        assert kwargs == {'raise_errors': True}
+        raise httpx.ConnectError('offline')
+
+    monkeypatch.setattr('app.core.config.get_settings', lambda: SimpleNamespace(
+        rate_limit_ocr_per_minute=10, trusted_proxy_ips=''))
+    monkeypatch.setattr('app.services.rate_limit_service.enforce_rate_limit', allow_rate_limit)
+    monkeypatch.setattr('app.integrations.upload_scanner.scan_upload', allow_upload_scan)
+    monkeypatch.setattr(ocr_service, 'extract_fdr_fields', fail_extraction)
+
+    request = Request({
+        'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
+        'method': 'POST', 'scheme': 'http', 'path': '/api/v1/fdrs/extract-preview',
+        'raw_path': b'/api/v1/fdrs/extract-preview', 'query_string': b'',
+        'headers': [], 'client': ('127.0.0.1', 1234), 'server': ('127.0.0.1', 8000),
+    })
+
+    class FakeUpload:
+        content_type = 'image/jpeg'
+
+        async def read(self):
+            return b'\xff\xd8\xfftest'
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(extract_preview(request, FakeUpload(), SimpleNamespace(id=1)))
+
+    assert exc_info.value.status_code == 502
+    assert 'Check the backend log' in exc_info.value.detail
+
+
 def test_corrupt_pdf_degrades_to_unextracted_result(monkeypatch):
     class FakeEngine:
         async def extract(self,pages): return fields()
@@ -184,6 +286,24 @@ def test_pdf_is_converted_and_only_first_two_pages_sent(monkeypatch):
     result=asyncio.run(ocr_service.extract_fdr_fields(b'%PDF-fake','application/pdf'))
     assert calls['first_page']==1 and calls['last_page']==2 and calls['page_count']==2
     assert result.confidence==1 and result.issue_date.isoformat()=='2026-03-31'
+
+
+def test_text_ocr_extracts_explicit_branch_label():
+    result=asyncio.run(ocr_service.parse_fdr_text(
+        'Fixed Deposit Receipt\nBank: SBI\nBranch Name: Park Street\nAccount No: SBI100001'
+    ))
+    assert result.branch=='Park Street'
+
+
+def test_extract_fdr_fields_preserves_branch_and_counts_it_in_confidence(monkeypatch):
+    class FakeEngine:
+        async def extract(self, pages): return fields()
+
+    monkeypatch.setattr(ocr_service, 'get_engine', lambda: FakeEngine())
+    result=asyncio.run(ocr_service.extract_fdr_fields(jpeg(), 'image/jpeg'))
+
+    assert result.branch=='Main Branch'
+    assert result.confidence==1
 
 
 def test_engine_selection_uses_ocr_engine_environment(monkeypatch):

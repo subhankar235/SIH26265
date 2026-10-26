@@ -1,5 +1,7 @@
 """FDR lifecycle endpoints."""
 
+import logging
+
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Request
 from datetime import date
 from decimal import Decimal
@@ -10,6 +12,7 @@ from app.schemas.fdr import FDRCreate, FDROut, FDRStatusUpdate, RenewalRequest
 from app.services import fdr_service, document_service
 from app.core.deps import pagination, Pagination
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post('/extract-preview')
@@ -31,11 +34,18 @@ async def extract_preview(request: Request, file: UploadFile = File(...), user=D
     from app.integrations.upload_scanner import scan_upload
     await scan_upload(data)
     from app.services.ocr_service import extract_fdr_fields
-    extracted = await extract_fdr_fields(data, file.content_type)
+    try:
+        extracted = await extract_fdr_fields(data, file.content_type, raise_errors=True)
+    except Exception as exc:
+        logger.exception('FDR OCR preview failed')
+        raise HTTPException(
+            502,
+            'OCR provider failed. Check the backend log; you can enter the fields manually.',
+        ) from exc
     fields = {
         'fdr_number': extracted.fdr_number,
         'bank_name': extracted.bank_name,
-        'branch': None,
+        'branch': extracted.branch,
         'amount': str(extracted.amount) if extracted.amount is not None else None,
         'issue_date': extracted.issue_date.isoformat() if extracted.issue_date else None,
         'maturity_date': extracted.maturity_date.isoformat() if extracted.maturity_date else None,
