@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { client } from '../api/client';
 import RoleGuard from '../components/common/RoleGuard';
@@ -9,13 +10,23 @@ import Login from '../pages/auth/Login';
 import { InstitutionRegister, OfficialRegister } from '../pages/auth/AuthPages';
 import FileDropzone from '../components/common/FileDropzone';
 import RefundDecisionPanel from '../components/refund/RefundDecisionPanel';
+import Sidebar from '../components/layout/Sidebar';
 import FdrUploadForm from '../components/fdr/FdrUploadForm';
 import SuperAdminSetup from '../pages/auth/SuperAdminSetup';
+import DiscrepancyBoard from '../pages/bureau/DiscrepancyBoard';
+import InstitutionsList from '../pages/bureau/InstitutionsList';
+import AdminAccounts from '../pages/admin/AdminAccounts';
+import { AdminAlerts, AdminRoles } from '../pages/admin/AdminPhase12';
 import AppRoutes from '../routes/AppRoutes';
 import Layout from '../components/layout/Layout';
 import { useAuthStore } from '../store/authStore';
 
-vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn() } }));
+vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn(), patch: vi.fn() } }));
+
+function renderWithQueryClient(ui) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 describe('FDR-Shield UI smoke tests', () => {
   it('guards a route for the configured role', () => {
@@ -36,12 +47,14 @@ describe('FDR-Shield UI smoke tests', () => {
   });
 
   it('requires review confirmation for every extracted field before FDR submission', async () => {
-    client.post.mockResolvedValueOnce({data:{fields:{fdr_number:'FDR-123',bank_name:'SBI',branch:null,amount:'1000',issue_date:'2025-01-01',maturity_date:'2030-01-01',holder:'College'},confidence:{fdr_number:.9,bank_name:.9,branch:0,amount:.9,issue_date:.9,maturity_date:.9,holder:.9}}});
+    client.post.mockResolvedValueOnce({data:{fields:{fdr_number:'FDR-123',bank_name:'SBI',branch:null,amount:'1000',issue_date:'2025-01-01',maturity_date:'2030-01-01',holder:'College'},confidence:{fdr_number:.9,bank_name:.9,branch:0,amount:.9,issue_date:.9,maturity_date:.9,holder:.9},format_check:{status:'fdr_like',reason:'FDR-like layout detected.'}}});
     const onSubmit=vi.fn();
     render(<FdrUploadForm onSubmit={onSubmit}/>);
     fireEvent.change(screen.getByLabelText(/FDR scan/),{target:{files:[new File(['%PDF-1.4'],'fdr.pdf',{type:'application/pdf'})]}});
     fireEvent.click(screen.getByRole('button',{name:'Extract and prefill fields'}));
     await screen.findByDisplayValue('FDR-123');
+    expect(screen.getByText(/Generic FDR format screen: fdr like/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not verify that the deposit exists/i)).toBeInTheDocument();
     const submit=screen.getByRole('button',{name:'Submit confirmed FDR'});
     expect(submit).toBeDisabled();
     expect(onSubmit).not.toHaveBeenCalled();
@@ -61,7 +74,7 @@ describe('FDR-Shield UI smoke tests', () => {
     render(<FdrUploadForm/>);
     fireEvent.change(screen.getByLabelText(/FDR scan/),{target:{files:[new File(['scan'],'scan.png',{type:'image/png'})]}});
     fireEvent.click(screen.getByRole('button',{name:'Extract and prefill fields'}));
-    expect(await screen.findByRole('status')).toHaveTextContent('OCR returned no readable fields');
+    expect(await screen.findByText(/OCR returned no readable fields/)).toBeInTheDocument();
   });
 
   it('requires a reason before making a refund decision', () => {
@@ -74,9 +87,11 @@ describe('FDR-Shield UI smoke tests', () => {
   });
 
   it('renders declared, OCR and bank comparison and marks a mismatch', () => {
-    render(<SplitViewer fdr={{fdr_number:'FDR-12',declared_data:{amount:100}}} report={{ocr:{amount:100},bank:{found:true,amount:90},discrepancies:[{field:'amount'}]}}/>);
-    expect(screen.getByText(/Mock bank match; demo only/)).toBeInTheDocument();
+    render(<SplitViewer fdr={{fdr_number:'FDR-12',declared_data:{amount:100}}} report={{ocr:{amount:100,document_format:'fdr_like',format_reason:'FDR structure detected.'},bank:{found:false,verification_status:'unsupported_bank',verification_message:'The demo gateway does not support ICICI Bank.'},discrepancies:[{field:'amount'}]}}/>);
+    expect(screen.getAllByText(/Institution-declared/).length).toBeGreaterThan(0);
     expect(screen.getByText(/do not independently certify that an FDR is genuine/i)).toBeInTheDocument();
+    expect(screen.getByText(/Generic FDR format screen: fdr like/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not support ICICI Bank/)).toBeInTheDocument();
     expect(screen.getByRole('row', { name: /Amount/ })).toHaveClass('bg-red-50');
   });
 
@@ -96,6 +111,72 @@ describe('FDR-Shield UI smoke tests', () => {
     fireEvent.change(screen.getByLabelText('Password'), {target:{value:'DemoPass123!'}});
     fireEvent.click(screen.getByRole('button', {name:'Continue securely'}));
     expect(await screen.findByRole('alert')).toHaveTextContent('Cannot reach the login service');
+  });
+
+  it('shows and retries discrepancy API errors instead of showing an empty board', async () => {
+    client.get.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ data: [] });
+    renderWithQueryClient(<DiscrepancyBoard />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load discrepancies');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('No open discrepancies')).toBeInTheDocument();
+  });
+
+  it('shows and retries institution list API errors instead of showing an empty list', async () => {
+    client.get.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ data: [] });
+    renderWithQueryClient(<InstitutionsList />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load institutions');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('No institutions found')).toBeInTheDocument();
+  });
+
+  it('exposes admin delivery monitoring and command center in navigation', () => {
+    useAuthStore.getState().setUser({ role: 'admin' });
+    render(<MemoryRouter><Sidebar /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: 'Delivery monitor' })).toHaveAttribute('href', '/admin/notifications');
+    expect(screen.getByRole('link', { name: 'Command Center' })).toHaveAttribute('href', '/admin/command');
+  });
+
+  it('surfaces FDR-list errors and disables test-alert submission', async () => {
+    client.get.mockImplementation((url) => {
+      if (url === '/admin/notification-deliveries') return Promise.resolve({ data: [] });
+      if (url === '/fdrs') return Promise.reject(new Error('offline'));
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    renderWithQueryClient(<AdminAlerts />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load FDRs for a test alert');
+    expect(screen.getByRole('button', { name: 'Queue test alert' })).toBeDisabled();
+  });
+
+  it('clears institution assignment when an institution user becomes staff', async () => {
+    client.get.mockResolvedValueOnce({ data: [{
+      id: 2, email: 'school@example.test', full_name: 'School User',
+      role: 'institution', institution_id: 9, status: 'active',
+    }] });
+    client.patch.mockResolvedValueOnce({ data: {} });
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    renderWithQueryClient(<MemoryRouter><AdminRoles /></MemoryRouter>);
+    const role = await screen.findByRole('combobox', { name: 'Role for school@example.test' });
+    fireEvent.change(role, { target: { value: 'aicte_official' } });
+    await waitFor(() => expect(client.patch).toHaveBeenCalledWith('/admin/users/2', {
+      role: 'aicte_official', institution_id: null,
+    }));
+  });
+
+  it('asks for an institution ID when assigning an institution role from user accounts', async () => {
+    client.get.mockResolvedValueOnce({ data: [{
+      id: 3, email: 'staff@example.test', full_name: 'Staff User',
+      role: 'aicte_official', institution_id: null, status: 'active',
+    }] });
+    client.patch.mockResolvedValueOnce({ data: {} });
+    vi.spyOn(window, 'prompt')
+      .mockReturnValueOnce('institution')
+      .mockReturnValueOnce('42');
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    renderWithQueryClient(<AdminAccounts />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Change role' }));
+    await waitFor(() => expect(client.patch).toHaveBeenCalledWith('/admin/users/3', {
+      role: 'institution', institution_id: 42,
+    }));
   });
 
   it('toggles password visibility accessibly and prevents repeated submission while pending', async () => {

@@ -26,6 +26,11 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
     mock_verified: 'Mock bank match; demo only', verified_external: 'Independently verified source',
     human_scrutinized: 'Human-scrutinized', ai_recommendation: 'AI recommendation only',
   }[level] || 'Evidence source not recorded';
+  const bankMessage = bank.verification_message || (
+    bank.found ? `Demo bank fixture matched (${bank.status}); not an independent bank confirmation.`
+      : 'Bank verification was not confirmed. This does not establish whether the FDR is genuine.'
+  );
+  const formatStatus = String(ocr.document_format || 'not_checked').replace(/_/g, ' ');
 
   return <div className="grid min-h-[620px] grid-cols-1 overflow-hidden rounded-xl border bg-white lg:grid-cols-2" aria-label="FDR scrutiny evidence viewer">
     <section className="border-b p-4 lg:border-b-0 lg:border-r">
@@ -35,11 +40,16 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
     <section className="p-4">
       <h2 className="mb-2 font-semibold">Evidence comparison</h2>
       <p className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-950"><strong>{evidenceLabel}.</strong> OCR consistency and a demo-bank match do not independently certify that an FDR is genuine.</p>
+      <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
+        <strong>Generic FDR format screen: {formatStatus}.</strong>{' '}
+        {ocr.format_reason || 'This OCR engine did not provide a format assessment.'}
+        {' '}This checks document appearance only; it is not bank verification or proof of authenticity.
+      </p>
       <div className="overflow-x-auto"><table className="w-full min-w-[540px] text-left text-sm">
         <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500"><tr>{['Field','Institution-declared','Document extraction','Demo bank gateway'].map(x=><th key={x} className="px-3 py-3">{x}</th>)}</tr></thead>
         <tbody className="divide-y">{rows.map(([field,d,o,b])=>{const mismatch=mismatches.has(field);return <tr key={field} className={mismatch?'bg-red-50 text-red-900':''}><th scope="row" className="px-3 py-3 font-medium">{labels[field]}{mismatch&&<AlertTriangle aria-label="Mismatch" size={14} className="ml-1 inline text-red-700"/>}</th><td className="px-3 py-3 tabular-nums">{val(field,d)}</td><td className="px-3 py-3 tabular-nums">{val(field,o)}</td><td className="px-3 py-3 tabular-nums">{val(field,b)}</td></tr>})}</tbody>
       </table></div>
-      <p className="mt-3 flex items-center gap-2 text-xs text-slate-600">{bank.found?<><CheckCircle2 size={14} className="text-amber-700"/>Demo bank fixture matched ({bank.status}); not an independent bank confirmation.</>:'No positive demo gateway match. Independent bank verification is not configured.'}</p>
+      <p className="mt-3 flex items-center gap-2 text-xs text-slate-600">{bank.found&&<CheckCircle2 size={14} className="text-amber-700"/>}{bankMessage}</p>
     </section>
   </div>;
 }

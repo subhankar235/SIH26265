@@ -212,7 +212,7 @@ async def workflow_events(workflow_id: int, after: int = 0, page: Pagination = D
              'received_at': row.received_at, 'processed_at': row.processed_at} for row in rows]
 
 
-@router.get('/{workflow_id}/stream')
+@router.get('/{workflow_id:int}/stream')
 async def stream_workflow(workflow_id: int, request: Request, after: int = 0,
                           session: AsyncSession = Depends(get_session), user = Depends(get_current_user)):
     instance = await _scoped_workflow(session, workflow_id, user)

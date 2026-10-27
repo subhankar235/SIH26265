@@ -29,6 +29,8 @@ async def extract_fdr_fields(file_bytes: bytes, content_type: str, *, raise_erro
             issue_date=_parse_date(values.get('issue_date')),
             maturity_date=_parse_date(values.get('maturity_date')),
             confidence=0,
+            document_format=values.get('document_format') or 'not_checked',
+            format_reason=_optional_text(values.get('format_reason')),
         )
         found = sum(getattr(result, field) is not None for field in (
             'fdr_number', 'bank_name', 'branch', 'holder_name', 'amount', 'issue_date', 'maturity_date'
@@ -113,6 +115,7 @@ async def parse_fdr_text(raw_text: str) -> OcrResult:
         issue_date=_parse_date(dates[0]) if dates else None,
         maturity_date=_parse_date(dates[1]) if len(dates)>1 else None,
         confidence=0,
+        document_format='not_checked',
     )
     result.confidence=sum(getattr(result,key) is not None for key in ('fdr_number','bank_name','branch','holder_name','amount','issue_date','maturity_date'))/7
     return result

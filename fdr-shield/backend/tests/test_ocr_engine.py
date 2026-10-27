@@ -23,7 +23,7 @@ def jpeg(size=(80, 40), color='white'):
 def fields(**overrides):
     result={key:None for key in FIELDS}
     result.update({'fdr_number':'SBI100001','bank_name':'SBI','branch':'Main Branch','holder_name':'ABC Institute of Technology','amount':1000000,'issue_date':'2026-03-31','maturity_date':'2027-03-31'})
-    result.update({'format_match':'sbi','format_reason':'Matches the SBI reference layout.'})
+    result.update({'document_format':'fdr_like','format_reason':'A structured deposit receipt layout is visible.'})
     result.update(overrides)
     return result
 
@@ -49,11 +49,11 @@ def test_ollama_vision_valid_json_and_image_resize(monkeypatch):
     assert request.url.path=='/api/chat'
     assert request.headers['authorization']=='Bearer test-key'
     assert body['stream'] is False and body['options']['temperature']==0
-    assert set(body['format']['properties'])==set(FIELDS)|{'format_match','format_reason'}
-    assert body['model']=='gemma4:31b' and len(body['messages'][0]['images'])==4
-    assert 'Reference 1: genuine SBI format' in body['messages'][0]['content']
-    assert 'Reference 2: genuine HDFC format' in body['messages'][0]['content']
-    assert 'Reference 3: genuine PNB format' in body['messages'][0]['content']
+    assert set(body['format']['properties'])==set(FIELDS)|{'document_format','format_reason'}
+    assert body['format']['properties']['document_format']['enum']==['fdr_like','not_fdr_like','uncertain']
+    assert body['model']=='gemma4:31b' and len(body['messages'][0]['images'])==1
+    assert 'bank-neutral' in body['messages'][0]['content']
+    assert 'cannot establish' in body['messages'][0]['content']
     image=Image.open(BytesIO(base64.b64decode(body['messages'][0]['images'][-1])))
     assert max(image.size)<=1600 and image.format=='JPEG'
     assert 'untrusted' in body['messages'][0]['content'].lower()
@@ -99,7 +99,7 @@ def test_omitted_fields_are_null_and_other_extracted_values_are_kept(monkeypatch
 
     assert calls['count']==1
     assert result['fdr_number']=='SBI100001'
-    assert result['bank_name']=='State Bank of India'
+    assert result['bank_name'] is None
     assert result['amount']==1000000
     assert result['maturity_date'] is None
     assert 'Ollama OCR response omitted fields' in caplog.text
@@ -124,30 +124,57 @@ def test_amount_text_is_normalized_without_discarding_other_fields(monkeypatch, 
     assert result['amount']==expected
 
 
-def test_none_format_match_preserves_readable_extracted_fields(monkeypatch):
+def test_not_fdr_like_format_assessment_preserves_readable_fields(monkeypatch):
     from app.integrations.ocr.reference_formats import clear_reference_cache
     clear_reference_cache()
     async def handler(request):
-        payload=fields(format_match='none',format_reason='Does not resemble a bank format.')
-        assert payload['format_match'] == 'none'
-        assert len(json.loads(request.content)['messages'][0]['images']) == 4
-        assert json.loads(request.content)['format']['properties']['format_match']['enum'] == ['sbi','hdfc','pnb','none']
+        payload=fields(document_format='not_fdr_like',format_reason='Document layout is unclear.')
+        assert payload['document_format'] == 'not_fdr_like'
+        assert len(json.loads(request.content)['messages'][0]['images']) == 1
+        assert json.loads(request.content)['format']['properties']['document_format']['enum'] == ['fdr_like','not_fdr_like','uncertain']
         return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
     result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
     assert result['fdr_number']=='SBI100001'
     assert result['amount']==1000000
-    assert set(result)==set(FIELDS)
+    assert result['document_format']=='not_fdr_like'
+    assert result['format_reason']=='Document layout is unclear.'
+    assert set(result)==set(FIELDS)|{'document_format','format_reason'}
     clear_reference_cache()
 
 
-@pytest.mark.parametrize(('format_match', 'expected_bank'), [
-    ('sbi', 'State Bank of India'),
-    ('hdfc', 'HDFC Bank'),
-    ('pnb', 'Punjab National Bank'),
-])
-def test_missing_bank_name_uses_matched_bank_format(monkeypatch, format_match, expected_bank):
-    payload=fields(bank_name=None,format_match=format_match)
+def test_generic_format_check_does_not_require_bank_template_or_infer_bank(monkeypatch):
+    payload=fields(bank_name='ICICI Bank',document_format='fdr_like')
+
+    async def handler(request):
+        body=json.loads(request.content)
+        assert len(body['messages'][0]['images'])==1
+        assert 'ICICI' not in body['messages'][0]['content']
+        assert 'State Bank of India' not in body['messages'][0]['content']
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+
+    assert result['bank_name']=='ICICI Bank'
+    assert result['document_format']=='fdr_like'
+
+
+def test_invalid_format_metadata_does_not_discard_extracted_fields(monkeypatch, caplog):
+    async def handler(request):
+        return httpx.Response(200,json={'message':{'content':json.dumps(
+            fields(document_format='genuine', format_reason=None))}})
+
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+    assert result['fdr_number']=='SBI100001'
+    assert result['document_format']=='uncertain'
+    assert result['format_reason']=='The OCR provider did not return a usable format assessment.'
+    assert 'preserving extracted fields' in caplog.text
+
+
+def test_unsupported_provider_fields_are_ignored_without_failing_preview(monkeypatch, caplog):
+    payload=fields(provider_confidence=0.93,issuer_category='bank')
 
     async def handler(request):
         return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
@@ -155,7 +182,43 @@ def test_missing_bank_name_uses_matched_bank_format(monkeypatch, format_match, e
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
     result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
 
-    assert result['bank_name']==expected_bank
+    assert result['fdr_number']=='SBI100001'
+    assert result['document_format']=='fdr_like'
+    warning=next(record for record in caplog.records if 'unsupported fields' in record.message)
+    assert warning.unexpected_fields==['issuer_category','provider_confidence']
+
+
+def test_common_bank_receipt_field_aliases_are_normalized(monkeypatch):
+    payload={
+        'fdr_no':'FDIN3021456789',
+        'bank':'ICICI Bank',
+        'branch_name':'Mumbai Main',
+        'customer_name':'MR. ROHIT MEHRA / MRS. NEHA MEHRA',
+        'principal_amount':'500000',
+        'opening_date':'2024-01-15',
+        'date_of_maturity':'2026-01-15',
+        'document_format':'fdr_like',
+        'format_reason':'Structured term-deposit receipt layout.',
+        'provider_confidence':0.99,
+    }
+
+    async def handler(request):
+        body=json.loads(request.content)
+        assert 'common labels' in body['messages'][0]['content']
+        assert body['format']['additionalProperties'] is False
+        return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
+
+    monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
+    result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
+
+    assert result['fdr_number']=='FDIN3021456789'
+    assert result['bank_name']=='ICICI Bank'
+    assert result['branch']=='Mumbai Main'
+    assert result['holder_name']=='MR. ROHIT MEHRA / MRS. NEHA MEHRA'
+    assert result['amount']=='500000'
+    assert result['issue_date']=='2024-01-15'
+    assert result['maturity_date']=='2026-01-15'
+    assert result['document_format']=='fdr_like'
 
 
 def test_negative_sample_short_circuits_model(monkeypatch):
@@ -166,24 +229,26 @@ def test_negative_sample_short_circuits_model(monkeypatch):
     async def handler(request): raise AssertionError('known negative must not call Ollama')
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings())
     result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([negative]))
-    assert set(result)==set(FIELDS) and all(value is None for value in result.values())
+    assert all(result[key] is None for key in FIELDS)
+    assert result['document_format']=='not_fdr_like'
     clear_reference_cache()
 
 
-def test_missing_references_warn_and_fall_back_to_plain_extraction(monkeypatch, tmp_path, caplog):
-    payload=fields()
+def test_generic_format_check_does_not_need_reference_images(monkeypatch, tmp_path):
+    payload=fields(document_format='uncertain')
     from app.integrations.ocr.reference_formats import clear_reference_cache
     clear_reference_cache()
     async def handler(request):
         body=json.loads(request.content)
         assert len(body['messages'][0]['images'])==1
-        assert 'format_match' not in body['messages'][0]['content']
+        assert 'bank-neutral' in body['messages'][0]['content']
+        assert body['format']['properties']['document_format']['enum']==['fdr_like','not_fdr_like','uncertain']
         return httpx.Response(200,json={'message':{'content':json.dumps(payload)}})
     monkeypatch.setattr('app.integrations.ocr.ollama_vision_engine.get_settings',lambda:settings(ocr_reference_dir=str(tmp_path)))
     monkeypatch.setattr('app.integrations.ocr.reference_formats.get_settings',lambda:settings(ocr_reference_dir=str(tmp_path)))
     result=asyncio.run(OllamaVisionEngine(httpx.MockTransport(handler)).extract([jpeg()]))
     assert result['fdr_number']=='SBI100001'
-    assert 'OCR reference format missing' in caplog.text
+    assert result['document_format']=='uncertain'
     clear_reference_cache()
 
 

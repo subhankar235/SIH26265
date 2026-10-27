@@ -56,6 +56,7 @@ async def extract_preview(request: Request, file: UploadFile = File(...), user=D
     confidence = {name: (float(extracted.confidence) if value not in (None, '') else 0.0)
                   for name, value in fields.items()}
     return {'fields': fields, 'confidence': confidence,
+            'format_check': {'status': extracted.document_format, 'reason': extracted.format_reason},
             'low_confidence_threshold': 0.7,
             'message': 'Missing values are not inferred; verify every field against the scan.'}
 
