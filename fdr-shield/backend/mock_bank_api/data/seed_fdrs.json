@@ -15,6 +15,41 @@
       "status": "ACTIVE"
     },
     {
+      "fdr_number": "SBI700000",
+      "holder_name": "ABC Institute of Technology",
+      "amount": 500000.0,
+      "maturity_date": "2026-10-06",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "SBI700003",
+      "holder_name": "National Institute of Design",
+      "amount": 650000.0,
+      "maturity_date": "2027-01-24",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "SBI700006",
+      "holder_name": "XYZ College of Engineering",
+      "amount": 800000.0,
+      "maturity_date": "2027-01-24",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "SBI700009",
+      "holder_name": "Eastern Technical University",
+      "amount": 950000.0,
+      "maturity_date": "2026-12-25",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "SBI700012",
+      "holder_name": "PQR Polytechnic",
+      "amount": 1150000.0,
+      "maturity_date": "2027-01-24",
+      "status": "ACTIVE"
+    },
+    {
       "fdr_number": "00000036821805542",
       "holder_name": "MR. SUBHASH KUMAR JAIN / MR. SUJEET KUMAR JAIN",
       "amount": 49000,
@@ -29,41 +64,6 @@
       "issue_date": "2017-04-29",
       "maturity_date": "2018-04-30",
       "status": "ACTIVE"
-    },
-    {
-      "fdr_number": "SBI700000",
-      "holder_name": "ABC Institute of Technology",
-      "amount": 500000.0,
-      "maturity_date": "2026-10-05",
-      "status": "ACTIVE"
-    },
-    {
-      "fdr_number": "SBI700003",
-      "holder_name": "National Institute of Design",
-      "amount": 650000.0,
-      "maturity_date": "2027-01-23",
-      "status": "ACTIVE"
-    },
-    {
-      "fdr_number": "SBI700006",
-      "holder_name": "XYZ College of Engineering",
-      "amount": 800000.0,
-      "maturity_date": "2027-01-23",
-      "status": "ACTIVE"
-    },
-    {
-      "fdr_number": "SBI700009",
-      "holder_name": "Eastern Technical University",
-      "amount": 950000.0,
-      "maturity_date": "2026-12-24",
-      "status": "ACTIVE"
-    },
-    {
-      "fdr_number": "SBI700012",
-      "holder_name": "PQR Polytechnic",
-      "amount": 1150000.0,
-      "maturity_date": "2027-01-23",
-      "status": "ACTIVE"
     }
   ],
   "pnb": [
@@ -75,46 +75,46 @@
       "status": "ACTIVE"
     },
     {
-      "fdr_number": "1558000101602751",
-      "holder_name": "KARAMBIR",
-      "amount": 800000,
-      "issue_date": "2024-09-14",
-      "maturity_date": "2026-09-14",
-      "status": "ACTIVE"
-    },
-    {
       "fdr_number": "PNB700001",
       "holder_name": "XYZ College of Engineering",
       "amount": 550000.0,
-      "maturity_date": "2026-10-25",
+      "maturity_date": "2026-10-26",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "PNB700004",
       "holder_name": "Eastern Technical University",
       "amount": 700000.0,
-      "maturity_date": "2027-02-22",
+      "maturity_date": "2027-02-23",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "PNB700007",
       "holder_name": "PQR Polytechnic",
       "amount": 900000.0,
-      "maturity_date": "2027-04-23",
+      "maturity_date": "2027-04-24",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "PNB700010",
       "holder_name": "ABC Institute of Technology",
       "amount": 1000000.0,
-      "maturity_date": "2027-02-22",
+      "maturity_date": "2027-02-23",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "PNB700013",
       "holder_name": "National Institute of Design",
       "amount": 1150000.0,
-      "maturity_date": "2027-04-23",
+      "maturity_date": "2027-04-24",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "1558000101602751",
+      "holder_name": "KARAMBIR",
+      "amount": 800000,
+      "issue_date": "2024-09-14",
+      "maturity_date": "2026-09-14",
       "status": "ACTIVE"
     }
   ],
@@ -127,46 +127,46 @@
       "status": "ACTIVE"
     },
     {
-      "fdr_number": "50300277148239",
-      "holder_name": "MS RAJWINDER KAUR",
-      "amount": 450000,
-      "issue_date": "2022-09-01",
-      "maturity_date": "2023-09-03",
-      "status": "ACTIVE"
-    },
-    {
       "fdr_number": "HDFC700002",
       "holder_name": "PQR Polytechnic",
       "amount": 650000.0,
-      "maturity_date": "2026-11-24",
+      "maturity_date": "2026-11-25",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "HDFC700005",
       "holder_name": "ABC Institute of Technology",
       "amount": 750000.0,
-      "maturity_date": "2026-11-24",
+      "maturity_date": "2026-11-25",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "HDFC700008",
       "holder_name": "National Institute of Design",
       "amount": 900000.0,
-      "maturity_date": "2026-10-20",
+      "maturity_date": "2026-10-21",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "HDFC700011",
       "holder_name": "XYZ College of Engineering",
       "amount": 1050000.0,
-      "maturity_date": "2026-11-24",
+      "maturity_date": "2026-11-25",
       "status": "ACTIVE"
     },
     {
       "fdr_number": "HDFC700014",
       "holder_name": "Eastern Technical University",
       "amount": 1200000.0,
-      "maturity_date": "2027-10-25",
+      "maturity_date": "2027-10-26",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "50300277148239",
+      "holder_name": "MS RAJWINDER KAUR",
+      "amount": 450000,
+      "issue_date": "2022-09-01",
+      "maturity_date": "2023-09-03",
       "status": "ACTIVE"
     }
   ]

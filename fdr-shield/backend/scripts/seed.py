@@ -110,7 +110,7 @@ async def seed():
         if not source.is_file(): raise RuntimeError(f'Missing genuine demo scan: {source}')
         (scan_dir / f'sample-{bank}.png').write_bytes(source.read_bytes())
 
-    print('FDR-Shield demo credentials (password for all: DemoPass123!):')
+    print('NidhiTrack demo credentials (password for all: DemoPass123!):')
     print('  officer@example.test and chief@example.test (AICTE Official), admin@example.test')
     for i in range(1, 6): print(f'  institution{i}@example.test')
 

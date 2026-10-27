@@ -24,7 +24,7 @@ def validate_role_institution(role: str, institution_id: int | None) -> None:
 async def _invite(session: AsyncSession, user: User) -> None:
     token = await auth_service.issue_one_time_token(session, user, 'INVITE', timedelta(hours=72))
     cfg = get_settings()
-    await send_email(user.email, 'FDR-Shield account invitation',
+    await send_email(user.email, 'NidhiTrack account invitation',
         f'<p>Set your password: <a href="{cfg.frontend_origin}/accept-invite?token={token}">Accept invitation</a></p>')
 
 
@@ -198,7 +198,7 @@ async def decide_registration(session: AsyncSession, user_id: int, approved: boo
             institution.status = 'active'
         if previous_status != AccountStatus.ACTIVE.value:
             target.session_version += 1
-        await send_email(target.email, 'FDR-Shield account approved',
+        await send_email(target.email, 'NidhiTrack account approved',
             '<p>Your application is approved. You may now sign in.</p>')
     else:
         target.status = AccountStatus.REJECTED.value
@@ -207,7 +207,7 @@ async def decide_registration(session: AsyncSession, user_id: int, approved: boo
         target.session_version += 1
         await session.execute(RefreshToken.__table__.update().where(RefreshToken.user_id == target.id,
             RefreshToken.revoked_at.is_(None)).values(revoked_at=auth_service.utcnow()))
-        await send_email(target.email, 'FDR-Shield registration update',
+        await send_email(target.email, 'NidhiTrack registration update',
             f'<p>Your registration was not approved. Reason: {reason or "Not specified"}</p>')
     action = ('REGISTRATION_DECISION_OVERRIDDEN' if override else
               'REGISTRATION_APPROVED' if approved else 'REGISTRATION_REJECTED')
@@ -228,7 +228,7 @@ async def reset_user_password(session: AsyncSession, user_id: int, actor: User) 
     if not target: raise NotFound('User not found.')
     raw = await auth_service.issue_one_time_token(session, target, 'RESET_PASSWORD', timedelta(minutes=30))
     cfg = get_settings()
-    await send_email(target.email, 'Reset your FDR-Shield password',
+    await send_email(target.email, 'Reset your NidhiTrack password',
         f'<p>Reset your password: <a href="{cfg.frontend_origin}/reset-password?token={raw}">Reset password</a></p>')
     await record(session, actor.id, 'user', target.id, 'PASSWORD_RESET_REQUESTED', '', {})
 
