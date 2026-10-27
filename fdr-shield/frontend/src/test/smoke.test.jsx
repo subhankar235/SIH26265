@@ -17,7 +17,7 @@ import { useAuthStore } from '../store/authStore';
 
 vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn() } }));
 
-describe('FDR-Shield UI smoke tests', () => {
+describe('NidhiTrack UI smoke tests', () => {
   it('guards a route for the configured role', () => {
     useAuthStore.getState().setUser({ role: 'aicte_official' });
     render(<MemoryRouter initialEntries={['/official']}><Routes><Route path="/official" element={<RoleGuard roles={['aicte_official']}><p>Official private</p></RoleGuard>}/></Routes></MemoryRouter>);
@@ -169,7 +169,7 @@ describe('FDR-Shield UI smoke tests', () => {
   it.each(['/institution/login','/official/login','/admin/login'])('%s routes to the one shared login screen', async path => {
     useAuthStore.getState().clearSession();
     render(<MemoryRouter initialEntries={[path]}><AppRoutes/></MemoryRouter>);
-    expect(await screen.findByRole('heading',{name:'Sign in to FDR-Shield'})).toBeInTheDocument();
+    expect(await screen.findByRole('heading',{name:'Sign in to NidhiTrack'})).toBeInTheDocument();
   });
 
   it.each(['/official/register','/super-admin/setup'])('%s renders outside dashboard chrome', path => {
@@ -181,14 +181,14 @@ describe('FDR-Shield UI smoke tests', () => {
   it('redirects direct protected-dashboard access to the shared role-choice login', async () => {
     useAuthStore.getState().clearSession();
     render(<MemoryRouter initialEntries={['/admin']}><Layout><AppRoutes/></Layout></MemoryRouter>);
-    expect(await screen.findByRole('heading',{name:'Sign in to FDR-Shield'})).toBeInTheDocument();
+    expect(await screen.findByRole('heading',{name:'Sign in to NidhiTrack'})).toBeInTheDocument();
     expect(screen.queryByRole('navigation',{name:'Main navigation'})).not.toBeInTheDocument();
   });
 
   it('routes a selected role from the three-choice login to the same shared login form', async () => {
     render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<Login/>}/></Routes></MemoryRouter>);
     fireEvent.click(screen.getAllByRole('button',{name:'Continue to sign in'})[1]);
-    expect(await screen.findByRole('heading',{name:'Sign in to FDR-Shield'})).toBeInTheDocument();
+    expect(await screen.findByRole('heading',{name:'Sign in to NidhiTrack'})).toBeInTheDocument();
     expect(screen.getByText('AICTE Official')).toBeInTheDocument();
   });
 });
