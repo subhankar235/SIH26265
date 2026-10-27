@@ -51,6 +51,7 @@ async def store_upload(session: AsyncSession, fdr_id: int, doc_type: str, file: 
     if doc_type == 'fdr_scan':
         workflow = await session.scalar(select(WorkflowInstance).where(
             WorkflowInstance.fdr_id == fdr_id).order_by(WorkflowInstance.execution_version.desc()).limit(1))
+        correction_resumed = False
         if workflow and workflow.execution_state == ExecutionState.WAITING_EVENT.value:
             correction = await session.scalar(select(CorrectionRequest).where(
                 CorrectionRequest.workflow_instance_id == workflow.id,
@@ -73,6 +74,21 @@ async def store_upload(session: AsyncSession, fdr_id: int, doc_type: str, file: 
                 await enqueue_outbox(session, str(workflow.id), 'WORKFLOW_WAKE',
                     {'workflow_instance_id': workflow.id, 'document_id': doc.id},
                     f'workflow:{workflow.id}:correction-document:{digest}')
+                correction_resumed = True
+        if not correction_resumed and (
+            workflow is None or workflow.execution_state not in {
+                ExecutionState.NOT_STARTED.value,
+                ExecutionState.RUNNING.value,
+                ExecutionState.RETRYING.value,
+            }
+        ):
+            from app.services.workflow_state_service import start_new_execution
+            fdr = await session.get(FDR, fdr_id)
+            if fdr:
+                await start_new_execution(
+                    session, fdr, user_id, 'FDR scan uploaded; verification reprocessing requested.',
+                    f'document-{doc.id}',
+                )
     return doc
 
 

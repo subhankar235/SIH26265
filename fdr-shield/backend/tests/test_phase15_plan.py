@@ -213,6 +213,50 @@ def test_correction_upload_resumes_with_new_document_version_and_keeps_old_resul
     asyncio.run(run())
 
 
+def test_first_scan_attached_to_existing_fdr_queues_verification_reprocessing(monkeypatch):
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+        from app.integrations import storage_client,upload_scanner
+        async def clean_scan(data): return {'scanned':False,'engine':'test'}
+        monkeypatch.setattr(upload_scanner,'scan_upload',clean_scan)
+        monkeypatch.setattr(storage_client,'put',lambda *args:None)
+        class FakeFile:
+            filename='receipt.pdf';content_type='application/pdf'
+            async def read(self): return b'%PDF-1.7 receipt content'
+        async with factory() as session:
+            inst=Institution(aicte_id='P15-MISSING-SCAN',name='Missing Scan College',state='Delhi',head_name='P',
+                contact_email='missing-scan@example.test',contact_phone='9000000013',status='active')
+            session.add(inst);await session.flush()
+            actor=User(email='missing-scan-user@example.test',full_name='Institution User',password_hash='x',
+                role='institution',institution_id=inst.id,status='active',is_active=True)
+            fdr=FDR(institution_id=inst.id,fdr_number='P15-FDR-MISSING-SCAN',bank_name='SBI',branch='',amount=100,
+                issue_date=date.today()-timedelta(days=10),maturity_date=date.today()+timedelta(days=365),
+                status='submitted',lifecycle_state='submitted',execution_state='completed',
+                authorization_state='not_required',trust_badge='self_declared',declared_data={},is_synthetic=False)
+            session.add_all([actor,fdr]);await session.flush()
+            old_workflow=WorkflowInstance(fdr_id=fdr.id,institution_id=inst.id,workflow_version='fdr-case-v1',
+                execution_version=1,lifecycle_state='submitted',execution_state='completed',
+                authorization_state='not_required')
+            session.add(old_workflow);await session.commit()
+
+            document=await store_upload(session,fdr.id,'fdr_scan',FakeFile(),actor.id)
+            workflows=list((await session.scalars(select(WorkflowInstance).where(
+                WorkflowInstance.fdr_id==fdr.id).order_by(WorkflowInstance.execution_version))).all())
+            assert document.doc_type=='fdr_scan'
+            assert len(workflows)==2
+            assert workflows[-1].execution_version==2
+            assert workflows[-1].execution_state=='not_started'
+            assert workflows[-1].lifecycle_state=='extraction_pending'
+            assert await session.scalar(select(OutboxEvent.id).where(
+                OutboxEvent.event_type=='WORKFLOW_WAKE',
+                OutboxEvent.aggregate_id==str(workflows[-1].id)))
+        await engine.dispose()
+    asyncio.run(run())
+
+
 def test_mismatch_pipeline_creates_one_correction_notification(monkeypatch):
     async def run():
         engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,

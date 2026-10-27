@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { client } from '../api/client';
@@ -15,6 +15,8 @@ import FdrUploadForm from '../components/fdr/FdrUploadForm';
 import SuperAdminSetup from '../pages/auth/SuperAdminSetup';
 import DiscrepancyBoard from '../pages/bureau/DiscrepancyBoard';
 import InstitutionsList from '../pages/bureau/InstitutionsList';
+import ScrutinySplitView from '../pages/bureau/ScrutinySplitView';
+import { InstitutionFdrDetail } from '../pages/institution/InstitutionOperations';
 import AdminAccounts from '../pages/admin/AdminAccounts';
 import { AdminAlerts, AdminRoles } from '../pages/admin/AdminPhase12';
 import AppRoutes from '../routes/AppRoutes';
@@ -93,6 +95,197 @@ describe('FDR-Shield UI smoke tests', () => {
     expect(screen.getByText(/Generic FDR format screen: fdr like/i)).toBeInTheDocument();
     expect(screen.getByText(/does not support ICICI Bank/)).toBeInTheDocument();
     expect(screen.getByRole('row', { name: /Amount/ })).toHaveClass('bg-red-50');
+  });
+
+  it('shows a missing scrutiny scan and allows a manual check', async () => {
+    let documentAttempts = 0;
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/15') return Promise.resolve({ data: {
+        id: 15, fdr_number: 'FDR-15', bank_name: 'ICICI Bank', branch: 'Main',
+        status: 'submitted', trust_badge: 'self_declared', declared_data: {},
+      } });
+      if (url === '/verification/15/report') return Promise.resolve({ data: {
+        ocr: { document_format: 'fdr_like' }, bank: {}, discrepancies: [],
+      } });
+      if (url === '/fdrs/15/presigned-url') {
+        documentAttempts += 1;
+        if (documentAttempts === 1) return Promise.reject({ response: { status: 404, data: { detail: 'Document not found' } } });
+        return Promise.resolve({ data: { url: 'https://storage.test/fdr-15.pdf' } });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={['/official/review/15']}>
+        <Routes><Route path="/official/review/:id" element={<ScrutinySplitView/>}/></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('No scan is attached to this FDR.')).toBeInTheDocument();
+    expect(documentAttempts).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Check document again' }));
+    expect(await screen.findByTitle('FDR scan')).toHaveAttribute('src', 'https://storage.test/fdr-15.pdf');
+    expect(documentAttempts).toBe(2);
+  });
+
+  it('automatically finds a scan uploaded after the scrutiny page was opened', async () => {
+    vi.useFakeTimers();
+    let documentAttempts = 0;
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/15') return Promise.resolve({ data: {
+        id: 15, fdr_number: 'FDR-15', bank_name: 'ICICI Bank', branch: 'Main',
+        status: 'submitted', trust_badge: 'self_declared', declared_data: {},
+      } });
+      if (url === '/verification/15/report') return Promise.resolve({ data: {
+        ocr: { document_format: 'fdr_like' }, bank: {}, discrepancies: [],
+      } });
+      if (url === '/fdrs/15/presigned-url') {
+        documentAttempts += 1;
+        if (documentAttempts === 1) return Promise.reject({ response: { status: 404, data: { detail: 'Document not found' } } });
+        return Promise.resolve({ data: { url: 'https://storage.test/uploaded-fdr-15.pdf' } });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    try {
+      renderWithQueryClient(
+        <MemoryRouter initialEntries={['/official/review/15']}>
+          <Routes><Route path="/official/review/:id" element={<ScrutinySplitView/>}/></Routes>
+        </MemoryRouter>,
+      );
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(documentAttempts).toBe(1);
+      expect(screen.getByText('No scan is attached to this FDR.')).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+
+      expect(documentAttempts).toBe(2);
+      expect(screen.getByTitle('FDR scan')).toHaveAttribute('src', 'https://storage.test/uploaded-fdr-15.pdf');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes scrutiny evidence after an OCR retry completes', async () => {
+    vi.useFakeTimers();
+    let reportAttempts = 0;
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/15') return Promise.resolve({ data: {
+        id: 15, fdr_number: 'FDR-15', bank_name: 'SBI', branch: 'Main',
+        status: 'submitted', trust_badge: 'self_declared', declared_data: {
+          fdr_number: 'SBIFD20240123456',
+        },
+      } });
+      if (url === '/verification/15/report') {
+        reportAttempts += 1;
+        return Promise.resolve({ data: {
+          ocr: reportAttempts === 1
+            ? { confidence: 0, document_format: 'not_checked' }
+            : { confidence: 0.8, fdr_number: 'SBIFD20240123456', document_format: 'fdr_like' },
+          bank: null,
+          discrepancies: [],
+        } });
+      }
+      if (url === '/fdrs/15/presigned-url') return Promise.resolve({ data: {
+        url: 'https://storage.test/fdr-15.pdf',
+      } });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    try {
+      renderWithQueryClient(
+        <MemoryRouter initialEntries={['/official/review/15']}>
+          <Routes><Route path="/official/review/:id" element={<ScrutinySplitView/>}/></Routes>
+        </MemoryRouter>,
+      );
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(reportAttempts).toBe(1);
+      expect(screen.getByText(/No completed OCR result with a format assessment is available for this FDR/)).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+      expect(reportAttempts).toBe(2);
+      expect(screen.getByText('Generic FDR format screen: fdr like.')).toBeInTheDocument();
+      expect(screen.getByRole('row', { name: /FDR number SBIFD20240123456 SBIFD20240123456/ })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets an institution attach a missing scan to the existing FDR and refresh its preview', async () => {
+    let scanUploaded = false;
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/15') return Promise.resolve({ data: {
+        id: 15, fdr_number: 'FDR-15', bank_name: 'ICICI Bank', amount: 500000,
+        issue_date: '2024-01-15', maturity_date: '2026-01-15', status: 'submitted',
+        lifecycle_state: 'submitted', execution_state: 'waiting_human',
+        declared_data: {}, is_synthetic: false,
+      } });
+      if (url === '/verification/15/report') return Promise.resolve({ data: { discrepancies: [], ocr: {}, bank: {} } });
+      if (url === '/institution/ml/recommendations') return Promise.resolve({ data: { recommendations: [] } });
+      if (url === '/workflows') return Promise.resolve({ data: [] });
+      if (url === '/fdrs/15/presigned-url') return scanUploaded
+        ? Promise.resolve({ data: { url: 'https://storage.test/saved-fdr-15.pdf' } })
+        : Promise.reject({ response: { status: 404, data: { detail: 'Document not found' } } });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    client.post.mockImplementationOnce(() => {
+      scanUploaded = true;
+      return Promise.resolve({ data: { id: 21, fdr_id: 15, doc_type: 'fdr_scan' } });
+    });
+
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={['/institution/fdrs/15']}>
+        <Routes><Route path="/institution/fdrs/:id" element={<InstitutionFdrDetail/>}/></Routes>
+      </MemoryRouter>,
+    );
+
+    const scanInput = await screen.findByLabelText('Attach receipt scan');
+    fireEvent.change(scanInput, { target: { files: [new File(['%PDF-1.4'], 'receipt.pdf', { type: 'application/pdf' })] } });
+
+    await waitFor(() => expect(client.post).toHaveBeenCalledWith(
+      '/documents/15?doc_type=fdr_scan',
+      expect.any(FormData),
+    ));
+    expect(await screen.findByTitle('FDR scan for FDR-15')).toHaveAttribute('src', 'https://storage.test/saved-fdr-15.pdf');
+  });
+
+  it('lets an institution replace a scan when OCR evidence is missing and retries verification', async () => {
+    let retried = false;
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/15') return Promise.resolve({ data: {
+        id: 15, fdr_number: 'FDR-15', bank_name: 'SBI', amount: 500000,
+        issue_date: '2024-01-15', maturity_date: '2026-01-15', status: 'submitted',
+        lifecycle_state: 'submitted', execution_state: 'completed',
+        declared_data: {}, is_synthetic: false,
+      } });
+      if (url === '/verification/15/report') return Promise.resolve({ data: retried
+        ? { ocr: { confidence: 1, document_format: 'fdr_like' }, bank: {}, discrepancies: [] }
+        : { ocr: { confidence: 0, document_format: 'not_checked' }, bank: {}, discrepancies: [] } });
+      if (url === '/institution/ml/recommendations') return Promise.resolve({ data: { recommendations: [] } });
+      if (url === '/workflows') return Promise.resolve({ data: [] });
+      if (url === '/fdrs/15/presigned-url') return Promise.resolve({ data: { url: 'https://storage.test/fdr-15.pdf' } });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    client.post.mockImplementationOnce(() => {
+      retried = true;
+      return Promise.resolve({ data: { id: 22, fdr_id: 15, doc_type: 'fdr_scan' } });
+    });
+
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={['/institution/fdrs/15']}>
+        <Routes><Route path="/institution/fdrs/:id" element={<InstitutionFdrDetail/>}/></Routes>
+      </MemoryRouter>,
+    );
+
+    const scanInput = await screen.findByLabelText('Replace scan and retry extraction');
+    fireEvent.change(scanInput, { target: { files: [new File(['%PDF-1.4'], 'receipt.pdf', { type: 'application/pdf' })] } });
+
+    await waitFor(() => expect(client.post).toHaveBeenCalledWith(
+      '/documents/15?doc_type=fdr_scan',
+      expect.any(FormData),
+    ));
+    await waitFor(() => expect(screen.queryByLabelText('Replace scan and retry extraction')).not.toBeInTheDocument());
   });
 
   it('logs in and routes an institution to its portal', async () => {

@@ -42,7 +42,9 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
       <p className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-950"><strong>{evidenceLabel}.</strong> OCR consistency and a demo-bank match do not independently certify that an FDR is genuine.</p>
       <p className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800">
         <strong>Generic FDR format screen: {formatStatus}.</strong>{' '}
-        {ocr.format_reason || 'This OCR engine did not provide a format assessment.'}
+        {ocr.format_reason || (ocr.confidence > 0
+          ? 'This OCR result does not include a format assessment.'
+          : 'No completed OCR result with a format assessment is available for this FDR. The institution can replace the scan to retry extraction.')}
         {' '}This checks document appearance only; it is not bank verification or proof of authenticity.
       </p>
       <div className="overflow-x-auto"><table className="w-full min-w-[540px] text-left text-sm">
