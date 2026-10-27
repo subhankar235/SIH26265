@@ -13,7 +13,7 @@ async def on_startup():
     except Exception: pass
 async def health(): return {'status':'ok'}
 def create_app()->FastAPI:
-    app=FastAPI(title='FDR-Shield',version='1.0.0')
+    app=FastAPI(title='NidhiTrack',version='1.0.0')
     settings=get_settings()
     app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(',') if x.strip()],allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allow_headers=['Content-Type','X-CSRF-Token','X-Request-ID','Idempotency-Key'],expose_headers=['X-Request-ID'])
     app.add_middleware(AuditMiddleware); app.add_middleware(CSRFMiddleware); app.middleware('http')(add_request_id)

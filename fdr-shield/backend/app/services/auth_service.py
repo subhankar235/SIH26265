@@ -141,7 +141,7 @@ async def login(session: AsyncSession, email: str, password: str, portal: str,
                 user.locked_until = now + timedelta(minutes=cfg.lockout_minutes)
                 await record(session, user.id, 'user', user.id, 'ACCOUNT_LOCKED', ip or '',
                              {'status': [AccountStatus.ACTIVE.value, AccountStatus.LOCKED.value]})
-                await send_email(user.email, 'FDR-Shield account temporarily locked',
+                await send_email(user.email, 'NidhiTrack account temporarily locked',
                     f'<p>Your account is temporarily locked after repeated failed sign-in attempts. Try again after {cfg.lockout_minutes} minutes or contact an administrator.</p>')
         await _log_attempt(session, normalized, audit_portal, False, failure_reason, ip, user_agent)
         await record(session, user.id if user else None, 'auth', user.id if user else 0,
@@ -282,7 +282,7 @@ async def change_password(session: AsyncSession, user: User, current: str, new: 
     await session.execute(update(RefreshToken).where(RefreshToken.user_id == user.id,
         RefreshToken.revoked_at.is_(None)).values(revoked_at=utcnow()))
     await record(session, user.id, 'user', user.id, 'PASSWORD_CHANGED', ip or '', {})
-    await send_email(user.email, 'FDR-Shield password changed', '<p>Your account password was changed. If this was not you, contact an administrator.</p>')
+    await send_email(user.email, 'NidhiTrack password changed', '<p>Your account password was changed. If this was not you, contact an administrator.</p>')
 
 
 async def issue_one_time_token(session: AsyncSession, user: User, purpose: str, ttl: timedelta) -> str:
@@ -361,7 +361,7 @@ async def accept_invite(session: AsyncSession, raw: str, password: str, full_nam
     user.is_active = True
     user.email_verified_at = utcnow()
     await record(session, user.id, 'user', user.id, 'INVITE_ACCEPTED', 'system', {'status': [AccountStatus.INVITED.value, user.status]})
-    await send_email(user.email, 'FDR-Shield account activated', '<p>Your invited account is active and ready to use.</p>')
+    await send_email(user.email, 'NidhiTrack account activated', '<p>Your invited account is active and ready to use.</p>')
 
 
 async def request_password_reset(session: AsyncSession, email: str) -> None:
@@ -370,7 +370,7 @@ async def request_password_reset(session: AsyncSession, email: str) -> None:
     eligible = bool(user and user.status in {AccountStatus.ACTIVE.value, AccountStatus.LOCKED.value})
     raw = await issue_one_time_token(session, user, 'RESET_PASSWORD', timedelta(minutes=30)) if eligible and user else secrets.token_urlsafe(36)
     cfg = get_settings()
-    await send_email(normalized, 'Reset your FDR-Shield password',
+    await send_email(normalized, 'Reset your NidhiTrack password',
         f'<p>If a reset was requested for an eligible account, use this one-time link: <a href="{cfg.frontend_origin}/reset-password?token={raw}">Continue</a>.</p>')
     if eligible and user:
         await record(session, user.id, 'user', user.id, 'PASSWORD_RESET_REQUESTED', 'system', {})
@@ -392,7 +392,7 @@ async def reset_password(session: AsyncSession, raw: str, password: str) -> None
     await session.execute(update(RefreshToken).where(RefreshToken.user_id == user.id,
         RefreshToken.revoked_at.is_(None)).values(revoked_at=utcnow()))
     await record(session, user.id, 'user', user.id, 'PASSWORD_RESET_COMPLETED', 'system', {})
-    await send_email(user.email, 'FDR-Shield password reset completed', '<p>Your account password was reset. If this was not you, contact an administrator.</p>')
+    await send_email(user.email, 'NidhiTrack password reset completed', '<p>Your account password was reset. If this was not you, contact an administrator.</p>')
 
 
 async def setup_mfa(session: AsyncSession, user: User) -> dict:
@@ -401,4 +401,4 @@ async def setup_mfa(session: AsyncSession, user: User) -> dict:
     user.totp_secret = None
     await record(session, user.id, 'user', user.id, 'MFA_ENABLED', 'unknown', {'totp_enabled': [False, True]})
     import pyotp
-    return {'secret': secret, 'otpauth_url': pyotp.TOTP(secret).provisioning_uri(user.email, issuer_name='FDR-Shield')}
+    return {'secret': secret, 'otpauth_url': pyotp.TOTP(secret).provisioning_uri(user.email, issuer_name='NidhiTrack')}

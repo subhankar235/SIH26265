@@ -1,4 +1,4 @@
-# FDR-Shield: Module Guide (for Codex / Claude Code)
+# NidhiTrack: Module Guide (for Codex / Claude Code)
 
 Every file is a **stub**: signatures + comments saying what to implement (`raise NotImplementedError` / `throw new Error`). Replace stubs one by one. Read `01_HLD_LLD.md` first for the design.
 

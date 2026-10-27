@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, EyeOff, Landmark, ShieldCheck } from 'lucide-react';
+import BrandLogo from '../../components/layout/BrandLogo';
+import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { setupInitialSuperAdmin } from '../../api/auth.api';
+import BrandHeader from '../../components/layout/BrandHeader';
 
 export default function SuperAdminSetup() {
   const [busy, setBusy] = useState(false);
@@ -61,10 +63,10 @@ export default function SuperAdminSetup() {
     </label>;
   }
 
-  return <main className="grid min-h-screen place-items-center bg-slate-50 p-4 sm:p-8">
+  return <main className="min-h-screen bg-slate-50"><BrandHeader rightSlot={<Link to="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-[#273544] hover:bg-[#F1F5FA]">Sign in</Link>}/><div className="grid min-h-[calc(100vh-68px)] place-items-center p-4 sm:p-8">
     <section className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
       <header className="bg-navy-900 p-6 text-white sm:p-8">
-        <div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-white/10"><Landmark aria-hidden="true"/></span><span className="text-lg font-bold">FDR-Shield</span></div>
+        <BrandLogo inverse markClassName="h-11 w-11"/>
         <p className="mt-6 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-indigo-100"><ShieldCheck size={14} aria-hidden="true"/>Controlled initial setup</p>
         <h1 className="mt-3 text-2xl font-bold sm:text-3xl">Create the first Super Admin</h1>
         <p className="mt-2 max-w-xl text-sm leading-6 text-indigo-100/90">This one-time setup is available only while no Super Admin account exists and requires a secret configured on the backend.</p>
@@ -86,5 +88,5 @@ export default function SuperAdminSetup() {
         </form>}
       </div>
     </section>
-  </main>;
+  </div></main>;
 }

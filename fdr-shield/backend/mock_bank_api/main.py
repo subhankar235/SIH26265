@@ -6,7 +6,7 @@ except ModuleNotFoundError:
     from store import lookup
     from models import VerifyRequest
 
-app=FastAPI(title='FDR-Shield Demo Bank Gateway')
+app=FastAPI(title='NidhiTrack Demo Bank Gateway')
 @app.get('/banks')
 def banks(): return ['sbi','pnb','hdfc','icici']
 def install(bank):

@@ -10,9 +10,12 @@ const readTheme = () => {
 
 export const useUiStore = create(set => ({
   sidebarOpen: true,
+  mobileSidebarOpen: false,
   darkMode: readTheme(),
   filters: {},
   toggleSidebar: () => set(state => ({ sidebarOpen: !state.sidebarOpen })),
+  toggleMobileSidebar: () => set(state => ({ mobileSidebarOpen: !state.mobileSidebarOpen })),
+  closeMobileSidebar: () => set({ mobileSidebarOpen: false }),
   setFilters: filters => set({ filters }),
   toggleDarkMode: () => set(state => {
     const darkMode = !state.darkMode;
