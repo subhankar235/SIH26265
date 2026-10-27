@@ -6,7 +6,9 @@ from app.core.deps import Pagination
 from app.core.exceptions import NotFound
 from app.models.discrepancy import Discrepancy
 from app.models.fdr import FDR
+from app.models.workflow import WorkflowInstance, WorkflowNodeExecution
 from app.services.audit_service import record
+from app.core.config import get_settings
 
 
 async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | None = None) -> dict:
@@ -14,7 +16,34 @@ async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | N
     if not fdr or (institution_id is not None and fdr.institution_id != institution_id):
         raise NotFound('FDR not found')
     rows = (await session.scalars(select(Discrepancy).where(Discrepancy.fdr_id == fdr_id).order_by(Discrepancy.id))).all()
-    return {'ocr': fdr.ocr_data, 'bank': fdr.bank_data, 'discrepancies': rows, 'trust_badge': fdr.trust_badge}
+    workflow = await session.scalar(select(WorkflowInstance).where(
+        WorkflowInstance.fdr_id == fdr_id
+    ).order_by(WorkflowInstance.execution_version.desc()).limit(1))
+    processing = None
+    if workflow:
+        latest_node = await session.scalar(select(WorkflowNodeExecution).where(
+            WorkflowNodeExecution.workflow_instance_id == workflow.id
+        ).order_by(WorkflowNodeExecution.id.desc()).limit(1))
+        extraction_node = await session.scalar(select(WorkflowNodeExecution).where(
+            WorkflowNodeExecution.workflow_instance_id == workflow.id,
+            WorkflowNodeExecution.node_key == 'extract_document',
+        ).order_by(WorkflowNodeExecution.id.desc()).limit(1))
+        processing = {
+            'execution_state': workflow.execution_state,
+            'current_node': workflow.current_node,
+            'last_node': latest_node.node_key if latest_node else None,
+            'last_node_status': latest_node.status if latest_node else None,
+            'last_error_code': latest_node.error_code if latest_node and latest_node.status == 'failed' else None,
+            'extraction_status': extraction_node.status if extraction_node else None,
+            'extraction_error_code': extraction_node.error_code
+                if extraction_node and extraction_node.status == 'failed' else None,
+            'extraction_confidence': (extraction_node.output_ref or {}).get('confidence')
+                if extraction_node and extraction_node.status == 'succeeded' else None,
+        }
+        if get_settings().celery_task_always_eager:
+            processing['local_inline_enabled'] = True
+    return {'ocr': fdr.ocr_data, 'bank': fdr.bank_data, 'discrepancies': rows,
+            'trust_badge': fdr.trust_badge, 'processing': processing}
 
 
 async def resolve_discrepancy(session: AsyncSession, discrepancy_id: int, remarks: str, user_id: int, actor: str) -> Discrepancy:

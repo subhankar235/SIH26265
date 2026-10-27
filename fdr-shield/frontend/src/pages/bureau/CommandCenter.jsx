@@ -19,7 +19,8 @@ export default function CommandCenter({ adminMode = false }) {
     mutationFn: (body) => client.post('/commands/interpret', body),
     onSuccess: ({ data }) => {
       setActive(data);
-      setProgress(data.queued ? { command_id: data.command_id, status: data.status, queued: true } : null);
+      setProgress(data.command_id ? { command_id: data.command_id, status: data.status,
+        queued: Boolean(data.queued), result_summary: data.result_summary } : null);
       qc.invalidateQueries({ queryKey: ['command-history'] });
     },
   });
@@ -148,14 +149,19 @@ export default function CommandCenter({ adminMode = false }) {
           >
             {interpret.isPending ? 'Interpreting…' : 'Build plan'}
           </button>
-          {[
+          {(adminMode ? [
+            'Find FDRs maturing within 30 days',
+            'Show cases waiting for correction',
+            'Show cases awaiting my approval',
+            'Explain why FDR-1024 is blocked',
+          ] : [
             'Find FDRs maturing within 30 days',
             'Show cases waiting for correction',
             'Show cases awaiting my approval',
             'Prepare reminder drafts for maturing FDRs',
             'Explain why FDR-1024 is blocked',
             'Escalate cases waiting for correction',
-          ].map((example) => (
+          ]).map((example) => (
             <button
               key={example}
               type="button"
@@ -184,6 +190,7 @@ export default function CommandCenter({ adminMode = false }) {
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-700">{effectSummary}</p>
+          {active.interpreter&&<p className="mt-1 text-xs text-slate-500">Plan source: {active.interpreter==='llm-structured'?'configured LLM':'deterministic offline fallback'}</p>}
 
           <h3 className="mt-4 font-medium text-slate-900">
             Server-resolved targets ({targets.length})

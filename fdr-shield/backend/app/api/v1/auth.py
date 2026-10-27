@@ -1,4 +1,5 @@
-"""Manual three-portal authentication using short-lived HttpOnly cookies."""
+"""Manual three-portal authentication using HttpOnly cookies and DB-backed refresh rotation."""
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -7,96 +8,81 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.deps import get_current_user, get_client_ip
 from app.core.exceptions import AccountStatusError, AuthError, RateLimitError
-from app.core.security import make_csrf_token
-from app.schemas.auth import (LoginRequest, MfaVerifyRequest, PasswordChangeRequest,
+from app.core.cookies import (COOKIE_ACCESS, COOKIE_CSRF, COOKIE_REFRESH,
+    clear_session_cookies, set_csrf_cookie, set_mfa_cookie, set_session_cookies)
+from app.schemas.auth import (LoginRequest, LoginCredentials, MfaVerifyRequest, PasswordChangeRequest,
     InstitutionRegistrationRequest, ForgotPasswordRequest, TokenBody, ResetPasswordRequest,
     InviteAcceptRequest, OfficialRegistrationRequest)
 from app.schemas.super_admin_setup import SuperAdminSetupRequest
 from app.services import auth_service
 
 router = APIRouter()
-COOKIE_ACCESS = 'access_token'
-COOKIE_REFRESH = 'refresh_token'
-COOKIE_CSRF = 'csrf_token'
+logger=logging.getLogger(__name__)
 
 
-def _cookie_options() -> dict:
-    cfg = get_settings()
-    return {'secure': cfg.cookie_secure, 'samesite': cfg.cookie_samesite,
-            'domain': cfg.cookie_domain or None}
+def _login_error_response(request: Request, status: int, code: str, message: str) -> JSONResponse:
+    payload={'code':code,'message':message}
+    request_id=getattr(request.state,'request_id',None)
+    if request_id: payload['request_id']=request_id
+    response=JSONResponse(status_code=status,content={'error':payload})
+    clear_session_cookies(response)
+    return response
 
 
-def _set_csrf(response: Response) -> None:
-    response.set_cookie(COOKIE_CSRF, make_csrf_token(), httponly=False, path='/',
-        max_age=7 * 24 * 3600, **_cookie_options())
-
-
-def _set_session(response: Response, data: dict) -> None:
-    cfg = get_settings()
-    options = _cookie_options()
-    response.set_cookie(COOKIE_ACCESS, data['access_token'], httponly=True, path='/',
-        max_age=cfg.access_token_minutes * 60, **options)
-    response.set_cookie(COOKIE_REFRESH, data['refresh_token'], httponly=True,
-        path='/api/v1/auth', max_age=cfg.refresh_token_days * 86400, **options)
-    response.delete_cookie('mfa_token', path='/api/v1/auth', **options)
-    _set_csrf(response)
-
-
-def _clear_session(response: Response) -> None:
-    options = _cookie_options()
-    response.delete_cookie(COOKIE_ACCESS, path='/', **options)
-    response.delete_cookie(COOKIE_REFRESH, path='/api/v1/auth', **options)
-    response.delete_cookie('mfa_token', path='/api/v1/auth', **options)
-    response.delete_cookie(COOKIE_CSRF, path='/', **options)
-
-
-async def _shared_login(body: LoginRequest, request: Request,
-                        response: Response, session: AsyncSession) -> dict:
+async def _shared_login(body: LoginCredentials, request: Request,
+                        response: Response, session: AsyncSession, portal: str) -> dict | JSONResponse:
+    # A portal login replaces the current shared SSO session. Middleware requires
+    # CSRF on login requests so a cross-site request cannot revoke that session.
+    await auth_service.logout(session,request.cookies.get(COOKIE_REFRESH),
+        request.cookies.get(COOKIE_ACCESS),get_client_ip(request))
     try:
-        data = await auth_service.login(session, str(body.email), body.password, None,
+        data = await auth_service.login(session, str(body.email), body.password, portal,
             get_client_ip(request), request.headers.get('user-agent'))
-    except RateLimitError:
+    except RateLimitError as exc:
         await session.commit()
-        raise
-    except AccountStatusError:
+        return _login_error_response(request,429,'RATE_LIMITED',str(exc))
+    except AccountStatusError as exc:
         await session.commit()
-        raise
+        return _login_error_response(request,403,'ACCOUNT_STATUS',str(exc))
     except AuthError:
         await session.commit()  # retain failed-attempt and lockout records
-        raise AuthError(auth_service.GENERIC_INVALID)
+        logger.info('auth_login_rejected',extra={'request_id':getattr(request.state,'request_id',None),
+            'portal':portal,'failure_category':'invalid_credentials_or_wrong_portal'})
+        return _login_error_response(request,401,'INVALID_CREDENTIALS',auth_service.GENERIC_INVALID)
     if data.get('mfa_required'):
-        cfg = get_settings()
-        response.set_cookie('mfa_token', data['mfa_token'], httponly=True, path='/api/v1/auth',
-            max_age=300, **_cookie_options())
-        _set_csrf(response)
-        return {'mfa_required': True}
-    _set_session(response, data)
-    return {'mfa_required': False, 'user': data['user']}
+        logger.info('auth_mfa_required',extra={'request_id':getattr(request.state,'request_id',None),
+            'portal':portal})
+        csrf=set_mfa_cookie(response,data['mfa_token'])
+        return {'mfa_required': True,'csrf_token':csrf}
+    csrf=set_session_cookies(response, data)
+    logger.info('auth_login_succeeded',extra={'request_id':getattr(request.state,'request_id',None),
+        'user_id':data['user']['id'],'role':data['user']['role'],'portal':portal})
+    return {'mfa_required': False, 'user': data['user'],'csrf_token':csrf}
 
 
 @router.post('/login')
 async def shared_login(body: LoginRequest, request: Request, response: Response,
                        session: AsyncSession = Depends(get_session)):
-    """Single login endpoint; role is resolved from the matched database account."""
-    return await _shared_login(body, request, response, session)
+    """Authenticate only when the stored role matches the selected portal."""
+    return await _shared_login(body, request, response, session, body.portal)
 
 
 @router.post('/login/institution', include_in_schema=False)
-async def institution_login_compat(body: LoginRequest, request: Request, response: Response,
+async def institution_login_compat(body: LoginCredentials, request: Request, response: Response,
                                    session: AsyncSession = Depends(get_session)):
-    return await _shared_login(body, request, response, session)
+    return await _shared_login(body, request, response, session, 'institution')
 
 
 @router.post('/login/official', include_in_schema=False)
-async def official_login_compat(body: LoginRequest, request: Request, response: Response,
+async def official_login_compat(body: LoginCredentials, request: Request, response: Response,
                                 session: AsyncSession = Depends(get_session)):
-    return await _shared_login(body, request, response, session)
+    return await _shared_login(body, request, response, session, 'official')
 
 
 @router.post('/login/admin', include_in_schema=False)
-async def admin_login_compat(body: LoginRequest, request: Request, response: Response,
+async def admin_login_compat(body: LoginCredentials, request: Request, response: Response,
                              session: AsyncSession = Depends(get_session)):
-    return await _shared_login(body, request, response, session)
+    return await _shared_login(body, request, response, session, 'admin')
 
 
 @router.post('/mfa/verify')
@@ -112,29 +98,40 @@ async def verify_mfa(body: MfaVerifyRequest, request: Request, response: Respons
     except AuthError:
         await session.commit()
         raise
-    _set_session(response, data)
-    return {'user': data['user']}
+    csrf=set_session_cookies(response, data)
+    return {'user': data['user'],'csrf_token':csrf}
 
 
 @router.post('/refresh')
 async def refresh(request: Request, response: Response, session: AsyncSession = Depends(get_session)):
     raw = request.cookies.get(COOKIE_REFRESH)
-    if not raw: raise AuthError('Session expired. Sign in again.')
+    if not raw:
+        failed=JSONResponse(status_code=401,content={'error':{'code':'INVALID_CREDENTIALS',
+            'message':'Session expired. Sign in again.','request_id':getattr(request.state,'request_id',None)}})
+        clear_session_cookies(failed)
+        logger.info('auth_refresh_rejected',extra={'request_id':getattr(request.state,'request_id',None),
+            'failure_category':'missing_refresh_cookie'})
+        return failed
     try:
         data = await auth_service.rotate_refresh(session, raw, get_client_ip(request), request.headers.get('user-agent'))
     except AuthError as exc:
         await session.commit()
         failed = JSONResponse(status_code=401, content={'error': {'code': 'INVALID_CREDENTIALS', 'message': str(exc)}})
-        _clear_session(failed)
+        clear_session_cookies(failed)
+        logger.warning('auth_refresh_rejected',extra={'request_id':getattr(request.state,'request_id',None),
+            'failure_category':'invalid_or_revoked_refresh'})
         return failed
-    _set_session(response, data)
-    return {'user': data['user']}
+    csrf=set_session_cookies(response, data)
+    logger.info('auth_refresh_succeeded',extra={'request_id':getattr(request.state,'request_id',None),
+        'user_id':data['user']['id'],'role':data['user']['role']})
+    return {'user': data['user'],'csrf_token':csrf}
 
 
 @router.post('/logout', status_code=204)
 async def logout(request: Request, response: Response, session: AsyncSession = Depends(get_session)):
     await auth_service.logout(session, request.cookies.get(COOKIE_REFRESH), request.cookies.get(COOKIE_ACCESS), get_client_ip(request))
-    _clear_session(response)
+    clear_session_cookies(response)
+    logger.info('auth_logout',extra={'request_id':getattr(request.state,'request_id',None)})
     response.status_code = 204
     return response
 
@@ -144,13 +141,19 @@ async def me(user=Depends(get_current_user)):
     return auth_service.user_public(user)
 
 
+@router.get('/csrf')
+async def csrf_bootstrap(response: Response):
+    """Issue/repair the readable CSRF cookie; auth cookies remain HttpOnly."""
+    return {'csrf_token':set_csrf_cookie(response)}
+
+
 @router.post('/change-password', status_code=204)
 async def change_password(body: PasswordChangeRequest, request: Request, response: Response,
                           session: AsyncSession = Depends(get_session), user=Depends(get_current_user)):
     try:
         auth_service.validate_password_strength(body.new_password, user.email, user.full_name)
         await auth_service.change_password(session, user, body.current_password, body.new_password, get_client_ip(request))
-        _clear_session(response)
+        clear_session_cookies(response)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

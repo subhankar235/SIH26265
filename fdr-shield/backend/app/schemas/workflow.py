@@ -92,10 +92,17 @@ class CommandCancelRequest(BaseModel):
     reason: str = Field(min_length=4,max_length=1000)
 
 
+class StrictCommandArgs(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+
 class CommandIntentModel(BaseModel):
     """Strict allowlisted intent contract used after deterministic/LLM parsing."""
     model_config = ConfigDict(extra='forbid')
-    intent: str
+    intent: Literal['find_maturing','recheck_document','list_by_state','prepare_reminders',
+        'list_overdue','pause_case','resume_case','retry_node','list_awaiting_my_approval',
+        'list_awaiting_approval','explain_blocked','explain_case_status',
+        'summarize_failed_notifications','escalate_cases']
     args: dict[str, Any] = Field(default_factory=dict)
     confidence: float = Field(default=1.0, ge=0, le=1)
 

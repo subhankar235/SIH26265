@@ -29,7 +29,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     for error, code in mapping.items():
         async def handler(request, exc, code=code, error=error):
             if error is AuthError:
-                return JSONResponse(status_code=code, content={'error': {'code': 'INVALID_CREDENTIALS', 'message': str(exc)}})
+                auth_error={'code':'INVALID_CREDENTIALS','message':str(exc)}
+                request_id=getattr(request.state,'request_id',None)
+                if request_id: auth_error['request_id']=request_id
+                return JSONResponse(status_code=code, content={'error':auth_error})
             if error is RateLimitError:
                 return JSONResponse(status_code=code, content={'error': {'code': 'RATE_LIMITED', 'message': str(exc),
                     'details':{},'request_id':getattr(request.state,'request_id',None)}})

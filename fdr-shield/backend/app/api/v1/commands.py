@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session, SessionLocal
-from app.core.deps import Pagination, get_current_user, pagination, get_client_ip
+from app.core.deps import Pagination, get_current_user, is_current_access_session, pagination, get_client_ip, require_roles
+from app.core.security import decode_token
 from app.core.exceptions import NotFound, PermissionDenied
 from app.core.enums import Role
 from app.models.workflow import CommandExecution
@@ -18,6 +19,7 @@ from app.services import command_service
 from app.services.event_bus import get_event_bus
 
 router = APIRouter()
+COMMAND_ACTORS=require_roles(Role.AICTE_OFFICIAL,Role.ADMIN)
 
 
 @router.post('/interpret', status_code=201)
@@ -25,14 +27,15 @@ async def interpret_command(
     body: CommandInterpretRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user)
+    user = Depends(COMMAND_ACTORS)
 ):
-    if user.role not in {Role.AICTE_OFFICIAL.value, Role.ADMIN.value, Role.INSTITUTION.value}:
-        raise PermissionDenied('Command Center is for authorized officials, institution representatives, and administrators.')
     from app.services.rate_limit_service import enforce_rate_limit
     from app.core.config import get_settings
     await enforce_rate_limit('commands',f'{user.id}:{get_client_ip(request)}',get_settings().rate_limit_commands_per_minute,60)
     command, plan = await command_service.interpret(session, user, body.text, body.idempotency_key)
+    from app.services.local_execution_service import run_inline_command_if_enabled
+    ran_inline=await run_inline_command_if_enabled(session,command.id)
+    if ran_inline: await session.refresh(command)
     
     # Step 9.4 contract: {command_id, plan: [{step, tool, resolved_targets[], effect_summary, requires_confirmation}], warnings[]}
     steps = plan.get('steps') or [{
@@ -49,7 +52,9 @@ async def interpret_command(
         'plan': steps,
         'plan_hash': command.plan_hash,
         'requires_confirmation': command.requires_confirmation,
-        'queued': not command.requires_confirmation,
+        'queued': command.status in {'confirmed','running'},
+        'result_summary':command.result_summary,
+        'interpreter':plan.get('interpreter'),
         'warnings': plan.get('warnings', []),
     }
 
@@ -59,10 +64,14 @@ async def confirm_command(
     command_id: int,
     body: CommandConfirmRequest,
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user)
+    user = Depends(COMMAND_ACTORS)
 ):
     command = await command_service.confirm(session, user, command_id, body.plan_hash)
-    return {'command_id': command.id, 'status': command.status, 'queued': True}
+    from app.services.local_execution_service import run_inline_command_if_enabled
+    ran_inline=await run_inline_command_if_enabled(session,command.id)
+    if ran_inline: await session.refresh(command)
+    return {'command_id': command.id, 'status': command.status,
+        'queued':command.status in {'confirmed','running'},'result_summary':command.result_summary}
 
 
 @router.post('/{command_id}/cancel')
@@ -70,7 +79,7 @@ async def cancel_command(
     command_id: int,
     body: CommandCancelRequest,
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user)
+    user = Depends(COMMAND_ACTORS)
 ):
     command = await command_service.cancel(session, user, command_id, body.reason)
     return {'command_id': command.id, 'status': command.status}
@@ -80,7 +89,7 @@ async def cancel_command(
 async def command_history(
     page: Pagination = Depends(pagination),
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user)
+    user = Depends(COMMAND_ACTORS)
 ):
     query = select(CommandExecution).order_by(CommandExecution.created_at.desc())
     if user.role != Role.ADMIN.value:
@@ -106,7 +115,7 @@ async def command_history(
 async def command_detail(
     command_id: int,
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user)
+    user = Depends(COMMAND_ACTORS)
 ):
     command = await session.get(CommandExecution, command_id)
     if not command or (user.role != Role.ADMIN.value and command.user_id != user.id):
@@ -131,7 +140,7 @@ async def command_stream(
     command_id: int,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    user = Depends(get_current_user)
+    user = Depends(COMMAND_ACTORS)
 ):
     command = await session.get(CommandExecution, command_id)
     if not command or (user.role != Role.ADMIN.value and command.user_id != user.id):
@@ -157,11 +166,15 @@ async def command_stream(
                 return
 
             # Verification of user status
+            try: live_claims=decode_token(request.cookies.get('access_token',''))
+            except Exception: live_claims={}
             async with SessionLocal() as check_session:
                 live_user = await check_session.get(User, user.id)
                 live_command = await check_session.get(CommandExecution, command_id)
+                session_valid=bool(live_user and await is_current_access_session(check_session,live_user,live_claims)
+                    and live_user.role in {Role.AICTE_OFFICIAL.value,Role.ADMIN.value})
 
-            if not live_user or not live_user.is_active or live_user.status != 'active':
+            if not session_valid:
                 yield 'event: stream.revoked\ndata: {}\n\n'
                 return
 

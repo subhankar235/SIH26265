@@ -9,10 +9,11 @@ from app.models.document import Document
 from app.schemas.verification import OcrResult
 from app.schemas.workflow import ExtractedField, ExtractionResult, ValidationDiscrepancy, ValidationResult
 from app.core.clock import business_today
+from app.services.bank_names import bank_code_for_name
 
 RULE_VERSION = 'fdr-validation-v1'
 REQUIRED_DECLARED = ('fdr_number','bank_name','amount','issue_date','maturity_date','holder')
-SUPPORTED_MOCK_BANKS = {'sbi','pnb','hdfc'}
+SUPPORTED_MOCK_BANKS = {'sbi','pnb','hdfc','icici'}
 
 
 def _normalized(value):
@@ -119,7 +120,7 @@ async def validate_fdr(session: AsyncSession, fdr: FDR,
 
     bank = _normalized(declared.get('bank_name'))
     if bank:
-        bank_code = bank.split()[0]
+        bank_code = bank_code_for_name(bank)
         if bank_code not in SUPPORTED_MOCK_BANKS:
             findings.append(_finding('bank_name', declared.get('bank_name'), None, 'low',
                 'bank_adapter_unavailable', 'This bank is not available in the demo verification adapter; official scrutiny is required.'))

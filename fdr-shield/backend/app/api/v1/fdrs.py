@@ -56,6 +56,7 @@ async def extract_preview(request: Request, file: UploadFile = File(...), user=D
     confidence = {name: (float(extracted.confidence) if value not in (None, '') else 0.0)
                   for name, value in fields.items()}
     return {'fields': fields, 'confidence': confidence,
+            'format_check': {'status': extracted.document_format, 'reason': extracted.format_reason},
             'low_confidence_threshold': 0.7,
             'message': 'Missing values are not inferred; verify every field against the scan.'}
 
@@ -89,6 +90,9 @@ async def submit_fdr(request:Request,fdr_number:str=Form(...),bank_name:str=Form
         await record(session, user.id, 'fdr', fdr.id, 'field_provenance_confirmed', '',
                      {'field_provenance': [None, provenance], 'confirmed_fields': [None, sorted(confirmed)]})
     await document_service.store_upload(session,fdr.id,'fdr_scan',file,user.id)
+    from app.services.local_execution_service import run_inline_workflow_if_enabled
+    if await run_inline_workflow_if_enabled(session, fdr.id):
+        await session.refresh(fdr)
     return {'id':fdr.id,'fdr_id':fdr.id,'status':fdr.status,'trust_badge':fdr.trust_badge,
             'lifecycle_state':fdr.lifecycle_state,'execution_state':fdr.execution_state}
 

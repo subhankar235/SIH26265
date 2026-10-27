@@ -16,15 +16,17 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
   const [validation, setValidation] = useState('');
   const [extractError, setExtractError] = useState('');
   const [extractNotice, setExtractNotice] = useState('');
+  const [formatCheck, setFormatCheck] = useState(null);
 
   async function extract() {
     if (!file) return setValidation('Choose your FDR scan first.');
     const form = new FormData(); form.append('file', file);
-    setExtracting(true); setExtractError(''); setExtractNotice(''); setValidation('');
+    setExtracting(true); setExtractError(''); setExtractNotice(''); setValidation(''); setFormatCheck(null);
     try {
       const { data } = await client.post('/fdrs/extract-preview', form);
       setValues(data.fields);
       setConfidence(data.confidence);
+      setFormatCheck(data.format_check || { status: 'not_checked', reason: 'Format screening was not performed by this OCR engine.' });
       if (!Object.values(data.fields || {}).some(value => value !== null && value !== '')) {
         setExtractNotice('OCR returned no readable fields. Check the scan is clear, or enter the details manually.');
       }
@@ -33,6 +35,7 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
     } catch (e) {
       setExtractError(e.response?.data?.detail || 'Could not extract fields. You may enter them manually.');
       setExtractNotice('');
+      setFormatCheck(null);
       setValues(Object.fromEntries(fields.map(([name]) => [name, ''])));
       setConfidence({});
       setProvenance(Object.fromEntries(fields.map(([name]) => [name, 'DECLARED'])));
@@ -52,6 +55,8 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
     setValidation(''); onSubmit?.(body);
   }
 
+  const formatStatus = String(formatCheck?.status || 'not_checked').replace(/_/g, ' ');
+
   return <form onSubmit={submit} className="grid gap-3 rounded-xl border bg-white p-5 sm:grid-cols-2">
     <div className="sm:col-span-2">
       <label className="text-sm font-medium">FDR scan <input type="file" accept="application/pdf,image/jpeg,image/png" required
@@ -59,7 +64,7 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
           setFile(e.target.files?.[0] || null);
           setValues(Object.fromEntries(fields.map(([name]) => [name, ''])));
           setProvenance(Object.fromEntries(fields.map(([name]) => [name, 'DECLARED'])));
-          setConfidence({}); setConfirmed({}); setExtractError(''); setExtractNotice('');
+          setConfidence({}); setConfirmed({}); setExtractError(''); setExtractNotice(''); setFormatCheck(null);
         }}
         className="mt-1 block w-full rounded-lg border p-3" /></label>
       <button type="button" disabled={!file || extracting || busy} onClick={extract}
@@ -68,6 +73,11 @@ export default function FdrUploadForm({ onSubmit, busy = false, error }) {
       </button>
       {extractError && <p role="status" className="mt-2 text-sm text-amber-800">{extractError}</p>}
       {extractNotice && <p role="status" className="mt-2 text-sm text-amber-800">{extractNotice}</p>}
+      {formatCheck && <p role="status" className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+        <strong>Generic FDR format screen: {formatStatus}.</strong>{' '}
+        {formatCheck.reason || 'This is an advisory document-format check only, not bank verification or proof of authenticity.'}
+        {' '}It does not verify that the deposit exists.
+      </p>}
     </div>
     {fields.map(([name, label]) => {
       const low = confidence[name] !== undefined && confidence[name] < 0.7;

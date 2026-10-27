@@ -13,9 +13,13 @@ def _normalized_email(value: str) -> str:
 EmailAddress = Annotated[str, AfterValidator(_normalized_email)]
 
 
-class LoginRequest(BaseModel):
+class LoginCredentials(BaseModel):
     email: EmailAddress
     password: str = Field(min_length=1, max_length=256)
+
+
+class LoginRequest(LoginCredentials):
+    portal: Literal['institution','official','admin']
 
 
 class MfaVerifyRequest(BaseModel):
