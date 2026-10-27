@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
+import BrandHeader from '../../components/layout/BrandHeader';
 import { useAuthStore } from '../../store/authStore';
 import { acceptInvite, changePassword, forgotPassword, registerInstitution, registerOfficial, resetPassword, verifyEmail } from '../../api/auth.api';
 
 function AuthPanel({ title, children }) {
-  return <main className="grid min-h-screen place-items-center bg-slate-50 p-5"><section className="w-full max-w-xl rounded-2xl border bg-white p-7 shadow-sm"><h1 className="text-2xl font-bold">{title}</h1>{children}</section></main>;
+  return <main className="min-h-screen bg-slate-50"><BrandHeader rightSlot={<Link to="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-[#273544] hover:bg-[#F1F5FA]">Sign in</Link>}/><div className="grid min-h-[calc(100vh-68px)] place-items-center p-5"><section className="w-full max-w-xl rounded-2xl border bg-white p-7 shadow-sm"><h1 className="text-2xl font-bold">{title}</h1>{children}</section></div></main>;
 }
 
 function PasswordField({ name, minLength, maxLength, autoComplete = 'new-password', inputClassName = 'mt-1 w-full rounded-lg border p-3' }) {

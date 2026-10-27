@@ -1,4 +1,4 @@
-# FDR-Shield: HLD & LLD
+# NidhiTrack: HLD & LLD
 
 AI-powered centralized Security Deposit & FDR management portal for AICTE.
 Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), optional OCR/LLM providers, **demo bank gateway**. The Compose example configures Ollama Cloud for OCR; the separate agent LLM provider is disabled until configured. Without usable provider credentials, manual field entry and deterministic assistant/ML fallbacks remain available. The default installation has no torch/GPU/ML dependencies.
