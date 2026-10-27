@@ -18,6 +18,7 @@ import InstitutionsList from '../pages/bureau/InstitutionsList';
 import ScrutinySplitView from '../pages/bureau/ScrutinySplitView';
 import ScrutinyQueue from '../pages/bureau/ScrutinyQueue';
 import WorkflowControlRoom from '../pages/bureau/WorkflowControlRoom';
+import CommandCenter from '../pages/bureau/CommandCenter';
 import { InstitutionFdrDetail } from '../pages/institution/InstitutionOperations';
 import AdminAccounts from '../pages/admin/AdminAccounts';
 import { AdminAlerts, AdminRoles } from '../pages/admin/AdminPhase12';
@@ -66,6 +67,20 @@ describe('FDR-Shield UI smoke tests', () => {
     expect(await screen.findByText('NEW-SUBMISSION')).toBeInTheDocument();
     expect(client.get).toHaveBeenCalledWith('/fdrs',{params:{page:1,size:100}});
     expect(client.get).toHaveBeenCalledWith('/fdrs',{params:{page:2,size:100}});
+  });
+
+  it('renders conversational Command Center replies separately from action plans', async () => {
+    client.get.mockResolvedValueOnce({ data: [] });
+    client.post.mockResolvedValueOnce({ data: {
+      mode: 'chat',
+      reply: 'Hello! I can help with general FDR guidance.',
+      interpreter: 'llm-chat',
+    } });
+    renderWithQueryClient(<MemoryRouter><CommandCenter/></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Ask a question or describe an FDR task'), { target: { value: 'Hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(/Assistant: Hello! I can help with general FDR guidance./)).toBeInTheDocument();
+    expect(screen.queryByText(/Execution plan · Tool:/)).not.toBeInTheDocument();
   });
 
   it('accepts a supported upload and reports the selected file', () => {

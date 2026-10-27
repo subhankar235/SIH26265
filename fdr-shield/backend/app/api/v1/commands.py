@@ -33,6 +33,8 @@ async def interpret_command(
     from app.core.config import get_settings
     await enforce_rate_limit('commands',f'{user.id}:{get_client_ip(request)}',get_settings().rate_limit_commands_per_minute,60)
     command, plan = await command_service.interpret(session, user, body.text, body.idempotency_key)
+    if command is None:
+        return {'mode': 'chat', 'reply': plan['reply'], 'interpreter': plan['interpreter']}
     from app.services.local_execution_service import run_inline_command_if_enabled
     ran_inline=await run_inline_command_if_enabled(session,command.id)
     if ran_inline: await session.refresh(command)
@@ -47,6 +49,7 @@ async def interpret_command(
     }]
     
     return {
+        'mode': 'action',
         'command_id': command.id,
         'status': command.status,
         'plan': steps,

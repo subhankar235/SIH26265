@@ -79,6 +79,8 @@ def test_command_interpreter_uses_configured_llm_and_parses_structured_intent(mo
             assert url == 'http://ollama/v1/chat/completions'
             assert json['model'] == 'qwen2.5:3b'
             assert headers['Authorization'] == 'Bearer test-token'
+            assert 'response_format' not in json
+            assert '"find_maturing"' in json['messages'][0]['content']
             assert '<user_command>' in json['messages'][1]['content']
             return Response()
 
@@ -184,6 +186,94 @@ def test_local_eager_command_runs_without_celery_or_beat(monkeypatch):
             assert 'found' in command.result_summary
         await engine.dispose()
     asyncio.run(run())
+
+
+def test_unsupported_conversation_gets_chat_reply_instead_of_command_conflict(monkeypatch):
+    import app.services.command_service as service
+    import app.services.llm_service as llm_service
+
+    async def unavailable_command_parser(_text):
+        raise InvalidStateTransition('This command is not in the supported allowlist. No action was performed.')
+
+    async def chat_reply(question, fallback):
+        assert question == 'Hi, what can you help me with?'
+        assert 'cannot access or change case records' in fallback
+        return 'Hello! I can help with general FDR guidance.', 'llm-chat'
+
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+        monkeypatch.setattr(service,'_interpret_text',unavailable_command_parser)
+        monkeypatch.setattr(llm_service,'generate_command_chat_reply',chat_reply)
+        async with factory() as session:
+            official=User(email='chat-official@example.test',full_name='Official',password_hash='x',
+                role=Role.AICTE_OFFICIAL.value,status='active',is_active=True)
+            session.add(official);await session.flush()
+            command, response=await interpret(session,official,'Hi, what can you help me with?','chat-key-123456')
+            assert command is None
+            assert response=={'mode':'chat','reply':'Hello! I can help with general FDR guidance.',
+                'interpreter':'llm-chat'}
+            assert await session.scalar(select(CommandExecution.id)) is None
+        await engine.dispose()
+    asyncio.run(run())
+
+
+def test_chat_reply_uses_configured_llm_without_structured_output(monkeypatch):
+    from types import SimpleNamespace
+    import app.services.llm_service as service
+
+    class Response:
+        def raise_for_status(self): pass
+        def json(self): return {'choices':[{'message':{'content':'Hello! I can help with FDR questions.'}}]}
+
+    class Client:
+        def __init__(self,timeout): assert timeout==4
+        async def __aenter__(self): return self
+        async def __aexit__(self,*args): pass
+        async def post(self,url,json,headers):
+            assert url=='https://ollama.test/v1/chat/completions'
+            assert json['model']=='gemma4:31b'
+            assert headers['Authorization']=='Bearer test-key'
+            assert 'response_format' not in json
+            assert 'never infer case-specific facts' in json['messages'][0]['content']
+            return Response()
+
+    monkeypatch.setattr(service,'get_settings',lambda:SimpleNamespace(
+        command_llm_enabled=True,command_llm_api_url='https://ollama.test/v1/chat/completions',
+        command_llm_api_key='test-key',command_llm_model='gemma4:31b',command_llm_timeout=4))
+    monkeypatch.setattr(service.httpx,'AsyncClient',Client)
+    reply,source=asyncio.run(service.generate_command_chat_reply('Hello','fallback'))
+    assert reply=='Hello! I can help with FDR questions.'
+    assert source=='llm-chat'
+
+
+def test_chat_reply_reports_provider_http_status_without_logging_credentials(monkeypatch, caplog):
+    from types import SimpleNamespace
+    import httpx
+    import app.services.llm_service as service
+
+    class Client:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def post(self, url, json, headers):
+            request = httpx.Request('POST', url)
+            response = httpx.Response(401, request=request)
+            raise httpx.HTTPStatusError('Unauthorized', request=request, response=response)
+
+    monkeypatch.setattr(service, 'get_settings', lambda: SimpleNamespace(
+        command_llm_enabled=True, command_llm_api_url='https://ollama.test/v1/chat/completions',
+        command_llm_api_key='test-key', command_llm_model='gemma4:31b', command_llm_timeout=4,
+    ))
+    monkeypatch.setattr(service.httpx, 'AsyncClient', Client)
+    reply, source = asyncio.run(service.generate_command_chat_reply('Hello', 'fallback'))
+
+    assert reply == 'fallback'
+    assert source == 'deterministic-chat-fallback'
+    assert 'HTTP 401 from ollama.test' in caplog.text
+    assert 'test-key' not in caplog.text
 
 
 def test_grounded_assistant_reply_uses_llm_but_falls_back_when_disabled(monkeypatch):

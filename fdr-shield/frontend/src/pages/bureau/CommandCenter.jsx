@@ -5,6 +5,7 @@ import { client } from '../../api/client';
 export default function CommandCenter({ adminMode = false }) {
   const [text, setText] = useState('');
   const [active, setActive] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
   const [progress, setProgress] = useState(null);
   const [sseActive, setSseActive] = useState(false);
   const qc = useQueryClient();
@@ -17,7 +18,17 @@ export default function CommandCenter({ adminMode = false }) {
 
   const interpret = useMutation({
     mutationFn: (body) => client.post('/commands/interpret', body),
-    onSuccess: ({ data }) => {
+    onSuccess: ({ data }, variables) => {
+      if (data.mode === 'chat') {
+        setChatMessages((messages) => [...messages, {
+          question: variables.text,
+          reply: data.reply,
+          interpreter: data.interpreter,
+        }]);
+        setActive(null);
+        setProgress(null);
+        return;
+      }
       setActive(data);
       setProgress(data.command_id ? { command_id: data.command_id, status: data.status,
         queued: Boolean(data.queued), result_summary: data.result_summary } : null);
@@ -125,13 +136,13 @@ export default function CommandCenter({ adminMode = false }) {
       </div>
 
       <p className="mb-5 max-w-3xl text-slate-600">
-        Type instructions in natural language. Commands follow strict policy validation, server-side entity resolution,
-        and allowlisted tool execution. Destructive and mutating operations require an explicit plan confirmation.
+        Ask general questions or request FDR actions in natural language. Chat answers do not access case records.
+        Operational requests use server-side entity resolution and allowlisted tools; mutating operations require confirmation.
       </p>
 
       <form onSubmit={submit} className="rounded-xl border bg-white p-5">
         <label className="block text-sm font-semibold">
-          Instruction
+          Ask a question or describe an FDR task
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -147,7 +158,7 @@ export default function CommandCenter({ adminMode = false }) {
             disabled={interpret.isPending}
             className="rounded-lg bg-indigo-950 px-4 py-2 font-semibold text-white disabled:opacity-50"
           >
-            {interpret.isPending ? 'Interpreting…' : 'Build plan'}
+            {interpret.isPending ? 'Thinking…' : 'Send'}
           </button>
           {(adminMode ? [
             'Find FDRs maturing within 30 days',
@@ -180,6 +191,20 @@ export default function CommandCenter({ adminMode = false }) {
           </p>
         )}
       </form>
+
+      {chatMessages.length > 0 && (
+        <section className="mt-5 space-y-3" aria-label="Assistant conversation" aria-live="polite">
+          {chatMessages.map((message, index) => (
+            <article key={`${index}-${message.question}`} className="rounded-xl border bg-white p-4">
+              <p className="text-sm font-semibold text-slate-700">You: {message.question}</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-900">Assistant: {message.reply}</p>
+              {message.interpreter === 'deterministic-chat-fallback' && (
+                <p className="mt-2 text-xs text-amber-800">LLM unavailable; showing local guidance.</p>
+              )}
+            </article>
+          ))}
+        </section>
+      )}
 
       {active && (
         <article className="mt-5 rounded-xl border border-indigo-200 bg-white p-5">
