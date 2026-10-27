@@ -132,6 +132,26 @@ describe('FDR-Shield UI smoke tests', () => {
     expect(screen.getByRole('row',{name:/FDR number AXISFD-123 OCR unavailable Unsupported bank/})).toBeInTheDocument();
   });
 
+  it('explains if OCR is pending, failed, or completed without readable fields', () => {
+    const fdr={fdr_number:'FDR-AXIS',declared_data:{}};
+    const report={ocr:{confidence:0,document_format:'not_checked'},bank:null,discrepancies:[]};
+    const pendingReport={...report,processing:{execution_state:'running',extraction_status:'running'}};
+    const {rerender}=render(<SplitViewer fdr={fdr} report={pendingReport}/>);
+    expect(screen.getByText(/Verification is queued or running/)).toBeInTheDocument();
+
+    const failedReport={...report,processing:{
+      execution_state:'failed',extraction_status:'failed',extraction_error_code:'TransientFailure',
+    }};
+    rerender(<SplitViewer fdr={fdr} report={failedReport}/>);
+    expect(screen.getByText(/Check that the OCR provider and worker are running/)).toBeInTheDocument();
+
+    const unreadableReport={...report,processing:{
+      execution_state:'waiting_event',extraction_status:'succeeded',extraction_confidence:0,
+    }};
+    rerender(<SplitViewer fdr={fdr} report={unreadableReport}/>);
+    expect(screen.getByText(/OCR completed but could not read any fields/)).toBeInTheDocument();
+  });
+
   it('shows a missing scrutiny scan and allows a manual check', async () => {
     let documentAttempts = 0;
     client.get.mockImplementation((url) => {
@@ -268,7 +288,7 @@ describe('FDR-Shield UI smoke tests', () => {
       );
       await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
       expect(reportAttempts).toBe(1);
-      expect(screen.getByText(/No completed OCR result with a format assessment is available for this FDR/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Retry verification with the scan currently on file/).length).toBeGreaterThan(0);
 
       await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
 

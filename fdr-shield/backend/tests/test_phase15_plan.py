@@ -16,12 +16,14 @@ from app.models import FDR, Institution, User
 from app.models.notification import Notification
 from app.models.document import Document
 from app.models.workflow import (CorrectionRequest, NotificationDeliveryAttempt, OutboxEvent,
-    VerificationRun, WorkflowEvent, WorkflowInstance)
+    VerificationRun, WorkflowEvent, WorkflowInstance, WorkflowNodeExecution)
 from app.schemas.fdr import FDRCreate
 from app.services import outbox_service
+from app.services import local_execution_service
 from app.services.fdr_service import create_fdr
 from app.services.notification_service import stage_for
 from app.services.document_service import store_upload
+from app.services.verification_service import get_report
 from app.workflows.transitions import ALLOWED, transition
 
 
@@ -78,6 +80,46 @@ def test_submit_creates_case_workflow_event_and_outbox_in_one_transaction():
             assert await verify.scalar(select(func.count(WorkflowInstance.id)))==0
             assert await verify.scalar(select(func.count(WorkflowEvent.id)))==0
             assert await verify.scalar(select(func.count(OutboxEvent.id)))==0
+        await engine.dispose()
+    asyncio.run(run())
+
+
+def test_local_eager_mode_runs_workflow_without_broker(monkeypatch):
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+        monkeypatch.setattr(local_execution_service,'get_settings',
+            lambda:SimpleNamespace(celery_task_always_eager=True))
+        from app.workers import tasks_workflow
+        monkeypatch.setattr(tasks_workflow,'SessionLocal',factory)
+        calls=[]
+        async def process_inline(workflow_id):
+            calls.append(workflow_id)
+            async with factory() as worker_session:
+                workflow=await worker_session.get(WorkflowInstance,workflow_id)
+                workflow.execution_state=ExecutionState.WAITING_HUMAN.value
+                await worker_session.commit()
+        monkeypatch.setattr(tasks_workflow,'_process_workflow',process_inline)
+        async with factory() as session:
+            institution=Institution(aicte_id='LOCAL-INLINE',name='Inline College',state='Delhi',
+                head_name='P',contact_email='inline@example.test',contact_phone='9000000012',status='active')
+            session.add(institution);await session.flush()
+            actor=User(email='inline-user@example.test',full_name='Inline User',password_hash='x',
+                role='institution',institution_id=institution.id,status='active',is_active=True)
+            session.add(actor);await session.flush()
+            fdr=await create_fdr(session,FDRCreate(fdr_number='LOCAL-INLINE-1',bank_name='SBI',
+                amount=Decimal('1000'),issue_date=date.today()-timedelta(days=10),
+                maturity_date=date.today()+timedelta(days=365),holder='College'),institution.id,actor.id)
+            workflow=await session.scalar(select(WorkflowInstance).where(WorkflowInstance.fdr_id==fdr.id))
+            assert workflow
+            assert await local_execution_service.run_inline_workflow_if_enabled(session,fdr.id)
+            assert calls==[workflow.id]
+            assert workflow.execution_state==ExecutionState.WAITING_HUMAN.value
+            events=list((await session.scalars(select(OutboxEvent).where(
+                OutboxEvent.aggregate_id==str(workflow.id)))).all())
+            assert events and all(event.status=='sent' for event in events)
         await engine.dispose()
     asyncio.run(run())
 
@@ -253,6 +295,46 @@ def test_first_scan_attached_to_existing_fdr_queues_verification_reprocessing(mo
             assert await session.scalar(select(OutboxEvent.id).where(
                 OutboxEvent.event_type=='WORKFLOW_WAKE',
                 OutboxEvent.aggregate_id==str(workflows[-1].id)))
+        await engine.dispose()
+    asyncio.run(run())
+
+
+def test_verification_report_exposes_safe_ocr_workflow_diagnostics():
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+        async with factory() as session:
+            inst=Institution(aicte_id='P15-OCR-DIAGNOSTIC',name='OCR Diagnostic College',state='Delhi',
+                head_name='P',contact_email='ocr-diagnostic@example.test',contact_phone='9000000014',status='active')
+            session.add(inst);await session.flush()
+            fdr=FDR(institution_id=inst.id,fdr_number='P15-OCR-DIAGNOSTIC-1',bank_name='AXIS BANK',branch='Main',
+                amount=100,issue_date=date.today()-timedelta(days=10),maturity_date=date.today()+timedelta(days=365),
+                status='submitted',lifecycle_state='validation_failed',execution_state='failed',
+                authorization_state='not_required',trust_badge='self_declared',declared_data={},is_synthetic=False)
+            session.add(fdr);await session.flush()
+            workflow=WorkflowInstance(fdr_id=fdr.id,institution_id=inst.id,workflow_version='fdr-case-v1',
+                execution_version=2,lifecycle_state='validation_failed',execution_state='failed',
+                authorization_state='not_required')
+            session.add(workflow);await session.flush()
+            session.add(WorkflowNodeExecution(workflow_instance_id=workflow.id,node_key='extract_document',
+                attempt=1,status='failed',error_class='TRANSIENT',error_code='TransientFailure',
+                error_message='private provider detail must not be exposed',workflow_version='fdr-case-v1'))
+            await session.commit()
+
+            report=await get_report(session,fdr.id)
+            assert report['processing']=={
+                'execution_state':'failed',
+                'current_node':None,
+                'last_node':'extract_document',
+                'last_node_status':'failed',
+                'last_error_code':'TransientFailure',
+                'extraction_status':'failed',
+                'extraction_error_code':'TransientFailure',
+                'extraction_confidence':None,
+            }
+            assert 'private provider detail' not in str(report)
         await engine.dispose()
     asyncio.run(run())
 

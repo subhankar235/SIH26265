@@ -27,7 +27,11 @@ async def upload_document(fdr_id: int, request: Request, doc_type: str, file: Up
     await fdr_service.get_fdr(session,fdr_id,scope)
     from app.services.rate_limit_service import enforce_rate_limit
     await enforce_rate_limit('document-upload',f'{user.id}:{get_client_ip(request)}',20,60)
-    return await document_service.store_upload(session,fdr_id,doc_type,file,user.id)
+    document = await document_service.store_upload(session,fdr_id,doc_type,file,user.id)
+    if doc_type == 'fdr_scan':
+        from app.services.local_execution_service import run_inline_workflow_if_enabled
+        await run_inline_workflow_if_enabled(session, fdr_id)
+    return document
 
 
 @router.get("/{fdr_id}")

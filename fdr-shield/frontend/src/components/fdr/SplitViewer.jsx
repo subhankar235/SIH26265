@@ -5,6 +5,7 @@ const labels = { fdr_number:'FDR number', bank_name:'Bank', holder:'Holder', amo
 
 export default function SplitViewer({ fileUrl, fdr, report }) {
   const declared = fdr?.declared_data || {}, ocr = report?.ocr || {}, bank = report?.bank || {};
+  const processing = report?.processing || {};
   const mismatches = new Set((report?.discrepancies || []).map((item) => item.field));
   const val = (field, value, missing = '—') => {
     if (value == null || value === '') return missing;
@@ -18,7 +19,7 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
     no_match: 'No demo match',
     gateway_unavailable: 'Gateway unavailable',
     matched: 'Not returned',
-  }[bank.verification_status] || 'Not checked';
+  }[bank.verification_status] || (ocr.confidence > 0 ? 'Not checked' : 'Not run: OCR unavailable');
   const rows = [
     ['fdr_number', declared.fdr_number, ocr.fdr_number, bank.found ? fdr?.fdr_number : null],
     ['bank_name', declared.bank_name, ocr.bank_name, null],
@@ -38,6 +39,18 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
       : 'Bank verification was not confirmed. This does not establish whether the FDR is genuine.'
   );
   const formatStatus = String(ocr.document_format || 'not_checked').replace(/_/g, ' ');
+  const activeExecution = ['not_started', 'running', 'retrying'].includes(processing.execution_state);
+  const extractionMessage = activeExecution
+    ? 'Verification is queued or running; OCR results will appear when extraction finishes.'
+    : processing.extraction_error_code === 'TransientFailure'
+      ? 'The last OCR attempt could not reach a required service. Check that the OCR provider and worker are running, then retry verification.'
+      : processing.extraction_error_code === 'InputFailure'
+        ? 'The last OCR attempt could not process this scan. Try a clear PDF or image scan, then retry verification.'
+        : processing.extraction_status === 'failed'
+          ? 'The last OCR attempt failed. Retry verification; if it fails again, inspect the worker log using the extraction error code.'
+          : processing.extraction_status === 'succeeded' && processing.extraction_confidence === 0
+            ? 'OCR completed but could not read any fields from this scan. Use a clearer scan or enter the fields manually.'
+            : 'No completed OCR result with a format assessment is available for this FDR. Retry verification with the scan currently on file.';
 
   return <div className="grid min-h-[620px] grid-cols-1 overflow-hidden rounded-xl border bg-white lg:grid-cols-2" aria-label="FDR scrutiny evidence viewer">
     <section className="border-b p-4 lg:border-b-0 lg:border-r">
@@ -51,7 +64,7 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
         <strong>Generic FDR format screen: {formatStatus}.</strong>{' '}
         {ocr.format_reason || (ocr.confidence > 0
           ? 'This OCR result does not include a format assessment.'
-          : 'No completed OCR result with a format assessment is available for this FDR. The institution can replace the scan to retry extraction.')}
+          : extractionMessage)}
         {' '}This checks document appearance only; it is not bank verification or proof of authenticity.
       </p>
       <div className="overflow-x-auto"><table className="w-full min-w-[540px] text-left text-sm">

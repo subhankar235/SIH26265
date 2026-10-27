@@ -18,7 +18,11 @@ async def run_verification(fdr_id: int, reason: str = Query('AICTE Official requ
     # Reprocessing starts a new durable execution version and preserves prior node history.
     fdr = await get_fdr(session, fdr_id)
     instance = await start_new_execution(session, fdr, user.id, reason, idempotency_key)
-    return {'queued':True,'workflow_id':instance.id,'execution_version':instance.execution_version,
+    from app.services.local_execution_service import run_inline_workflow_if_enabled
+    ran_inline = await run_inline_workflow_if_enabled(session, fdr_id)
+    if ran_inline:
+        await session.refresh(instance)
+    return {'queued':not ran_inline,'workflow_id':instance.id,'execution_version':instance.execution_version,
             'execution_state':instance.execution_state}
 
 
