@@ -1,18 +1,19 @@
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
 from cryptography.fernet import Fernet
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
+    model_config = SettingsConfigDict(env_file=Path(__file__).resolve().parents[2] / '.env', extra='ignore')
     app_env: str = 'dev'
     database_url: str = 'postgresql+asyncpg://fdr:fdr@localhost:5432/fdrshield'
     redis_url: str = 'redis://localhost:6379/0'
-    jwt_secret: str = 'development-only-change-me'
+    jwt_secret: str = ''
     jwt_algorithm: str = 'HS256'
-    access_token_minutes: int = 15
-    refresh_token_days: int = 7
+    access_token_minutes: int = 720
+    refresh_token_days: int = 30
     cookie_secure: bool = False
     cookie_samesite: str = 'lax'
     cookie_domain: str = ''
@@ -61,9 +62,21 @@ class Settings(BaseSettings):
     def validate_production_secrets(self):
         try: ZoneInfo(self.rules_default_tz)
         except ZoneInfoNotFoundError as exc: raise ValueError('RULES_DEFAULT_TZ must be a valid IANA timezone.') from exc
+        secret = self.jwt_secret.strip()
+        if len(secret) < 32 or any(marker in secret.casefold() for marker in ('replace', 'change_me', 'generate_a_secret')):
+            raise ValueError('JWT_SECRET must be a configured, random secret of at least 32 characters.')
+        self.jwt_secret = secret
+        self.cookie_samesite = self.cookie_samesite.strip().lower()
+        if self.cookie_samesite not in {'lax', 'strict', 'none'}:
+            raise ValueError('COOKIE_SAMESITE must be lax, strict, or none.')
+        if self.cookie_samesite == 'none' and not self.cookie_secure:
+            raise ValueError('COOKIE_SECURE must be enabled when COOKIE_SAMESITE=none.')
+        if self.access_token_minutes < 1 or self.refresh_token_days < 1:
+            raise ValueError('ACCESS_TOKEN_MINUTES and REFRESH_TOKEN_DAYS must be positive.')
+        self.jwt_algorithm=self.jwt_algorithm.strip().upper()
+        if self.jwt_algorithm not in {'HS256','HS384','HS512'}:
+            raise ValueError('JWT_ALGORITHM must be one of HS256, HS384, or HS512.')
         if self.app_env.lower() not in {'dev', 'development', 'test'}:
-            if len(self.jwt_secret) < 32 or self.jwt_secret == 'development-only-change-me':
-                raise ValueError('JWT_SECRET must be a unique secret of at least 32 characters outside development.')
             if not self.cookie_secure:
                 raise ValueError('COOKIE_SECURE must be enabled outside development.')
             if not self.frontend_origin.startswith('https://'):

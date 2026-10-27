@@ -37,6 +37,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 cookie = request.cookies.get('csrf_token', '')
                 header = request.headers.get('x-csrf-token', '')
                 if not cookie or not header or cookie != header or not verify_csrf_token(cookie):
+                    logger.warning('csrf_validation_failed',extra={'request_id':getattr(request.state,'request_id',None),
+                        'path':path})
                     return JSONResponse(status_code=403, content={'error': 'CSRF_VALIDATION_FAILED',
                         'detail': 'CSRF token missing or invalid.'})
         response = await call_next(request)

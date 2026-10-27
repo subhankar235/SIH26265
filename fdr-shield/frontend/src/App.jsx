@@ -1,19 +1,25 @@
 import AppRoutes from "./routes/AppRoutes";
 import Layout from "./components/layout/Layout";
 import { useEffect } from 'react';
-import { getMe } from './api/auth.api';
+import { useLocation } from 'react-router-dom';
+import { getCsrf, getMe } from './api/auth.api';
 import { useAuthStore } from './store/authStore';
 
 function AuthBootstrap({ children }) {
   const setUser = useAuthStore((state) => state.setUser);
-  const clearSession = useAuthStore((state) => state.clearSession);
+  const setRestoreUnavailable = useAuthStore((state) => state.setRestoreUnavailable);
+  const location = useLocation();
   useEffect(() => {
-    const hasSessionHint = document.cookie.split('; ').some((item) => item.startsWith('csrf_token='));
-    if (!hasSessionHint) { clearSession(); return; }
+    const publicPath = new Set(['/','/login','/mfa','/institution/register','/official/register',
+      '/super-admin/setup','/verify-email','/accept-invite','/forgot-password','/reset-password','/unauthorized']);
+    if (publicPath.has(location.pathname)) return;
     let active = true;
-    getMe().then((user) => { if (active) setUser(user); }).catch(() => { if (active) clearSession(); });
+    getCsrf().then(() => getMe()).then((user) => { if (active) setUser(user); })
+      .catch(() => {
+        if (active && useAuthStore.getState().status === 'loading') setRestoreUnavailable();
+      });
     return () => { active = false; };
-  }, [setUser, clearSession]);
+  }, [location.pathname, setUser, setRestoreUnavailable]);
   return children;
 }
 

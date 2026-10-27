@@ -4,13 +4,13 @@ import httpx
 import logging
 from app.core.config import get_settings
 from app.schemas.verification import BankVerifyResponse
+from app.services.bank_names import bank_code_for_name
 
 logger = logging.getLogger(__name__)
 
 async def verify_with_bank(bank_name: str, fdr_number: str, holder: str) -> BankVerifyResponse:
-    parts=bank_name.strip().lower().split(maxsplit=1)
-    bank=parts[0] if parts else ''
-    if bank not in {'sbi','pnb','hdfc'}:
+    bank=bank_code_for_name(bank_name)
+    if bank is None:
         return BankVerifyResponse(found=False,verification_status='unsupported_bank',
             verification_message=f'The demo gateway does not support {bank_name}; independent bank verification is not configured.')
     try:
@@ -34,4 +34,4 @@ async def list_supported_banks() -> list[str]:
     # GET {MOCK_BANK_URL}/banks
     async with httpx.AsyncClient(timeout=5) as client:
         try:r=await client.get(f"{get_settings().mock_bank_url}/banks");r.raise_for_status();return r.json()
-        except Exception:return ['sbi','pnb','hdfc']
+        except Exception:return ['sbi','pnb','hdfc','icici']

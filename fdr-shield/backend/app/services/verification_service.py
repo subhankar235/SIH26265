@@ -8,6 +8,7 @@ from app.models.discrepancy import Discrepancy
 from app.models.fdr import FDR
 from app.models.workflow import WorkflowInstance, WorkflowNodeExecution
 from app.services.audit_service import record
+from app.core.config import get_settings
 
 
 async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | None = None) -> dict:
@@ -39,6 +40,8 @@ async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | N
             'extraction_confidence': (extraction_node.output_ref or {}).get('confidence')
                 if extraction_node and extraction_node.status == 'succeeded' else None,
         }
+        if get_settings().celery_task_always_eager:
+            processing['local_inline_enabled'] = True
     return {'ocr': fdr.ocr_data, 'bank': fdr.bank_data, 'discrepancies': rows,
             'trust_badge': fdr.trust_badge, 'processing': processing}
 

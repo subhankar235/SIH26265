@@ -34,10 +34,15 @@ export default function Login() {
       }
       setUser(data.user);
       const defaultPath = data.user.role === 'institution' ? '/institution' : data.user.role === 'admin' ? '/admin' : '/official';
-      const requestedPath = location.state?.from?.pathname || '';
-      const expectedPrefix = `${defaultPath}/`;
-      const destination = requestedPath === defaultPath || requestedPath.startsWith(expectedPrefix)
-        ? requestedPath : defaultPath;
+      const statePath = location.state?.from
+        ? `${location.state.from.pathname || ''}${location.state.from.search || ''}${location.state.from.hash || ''}` : '';
+      const queryPath = searchParams.get('returnTo') || '';
+      const requestedPath = statePath || queryPath;
+      const rolePrefixes = data.user.role === 'institution' ? ['/institution']
+        : data.user.role === 'admin' ? ['/admin'] : ['/official','/bureau'];
+      const internalPath = requestedPath.startsWith('/') && !requestedPath.startsWith('//') &&
+        rolePrefixes.some(prefix => requestedPath === prefix || requestedPath.startsWith(`${prefix}/`));
+      const destination = internalPath ? requestedPath : defaultPath;
       navigate(destination, { replace: true });
     } catch (err) {
       const status = err.response?.status;

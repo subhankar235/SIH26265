@@ -4,6 +4,7 @@ export const login = (email, password) => client.post('/auth/login', { email, pa
 export const verifyMfa = (code) => client.post('/auth/mfa/verify', { code }).then((r) => r.data);
 export const setupMfa = () => client.post('/auth/mfa/setup').then((r) => r.data);
 export const getMe = () => client.get('/auth/me').then((r) => r.data);
+export const getCsrf = () => client.get('/auth/csrf').then((r) => r.data);
 export const logout = () => client.post('/auth/logout');
 export const changePassword = (data) => client.post('/auth/change-password', data);
 export const registerInstitution = (data) => client.post('/auth/register/institution', data);

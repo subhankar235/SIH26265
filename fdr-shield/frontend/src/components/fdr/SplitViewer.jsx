@@ -15,7 +15,7 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
   };
   const extractionMissing = ocr.confidence > 0 ? 'Not extracted' : 'OCR unavailable';
   const bankMissing = {
-    unsupported_bank: 'Unsupported bank',
+    unsupported_bank: 'Not checked (not in demo gateway)',
     no_match: 'No demo match',
     gateway_unavailable: 'Gateway unavailable',
     matched: 'Not returned',

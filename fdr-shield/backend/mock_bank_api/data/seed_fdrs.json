@@ -15,6 +15,14 @@
       "status": "ACTIVE"
     },
     {
+      "fdr_number": "SBIFD20240123456",
+      "holder_name": "MR. VIKRAM KUMAR SINGH / MRS. ANJALI SINGH",
+      "amount": 1000000,
+      "issue_date": "2024-02-10",
+      "maturity_date": "2027-02-10",
+      "status": "ACTIVE"
+    },
+    {
       "fdr_number": "00000036821805542",
       "holder_name": "MR. SUBHASH KUMAR JAIN / MR. SUJEET KUMAR JAIN",
       "amount": 49000,
@@ -167,6 +175,24 @@
       "holder_name": "Eastern Technical University",
       "amount": 1200000.0,
       "maturity_date": "2027-10-25",
+      "status": "ACTIVE"
+    },
+    {
+      "fdr_number": "HDFCFD2406147890",
+      "holder_name": "MR. SUBHANKAR NATH / MRS. RITU NATH",
+      "amount": 500000,
+      "issue_date": "2024-06-14",
+      "maturity_date": "2027-06-14",
+      "status": "ACTIVE"
+    }
+  ],
+  "icici": [
+    {
+      "fdr_number": "ICIFD2404056789",
+      "holder_name": "MR. ARJUN VERMA / MRS. POOJA VERMA",
+      "amount": 300000,
+      "issue_date": "2024-04-05",
+      "maturity_date": "2026-04-05",
       "status": "ACTIVE"
     }
   ]

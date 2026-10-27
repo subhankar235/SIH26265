@@ -30,7 +30,7 @@ async def upload_document(fdr_id: int, request: Request, doc_type: str, file: Up
     document = await document_service.store_upload(session,fdr_id,doc_type,file,user.id)
     if doc_type == 'fdr_scan':
         from app.services.local_execution_service import run_inline_workflow_if_enabled
-        await run_inline_workflow_if_enabled(session, fdr_id)
+        await run_inline_workflow_if_enabled(session, fdr_id, resume_active=True)
     return document
 
 

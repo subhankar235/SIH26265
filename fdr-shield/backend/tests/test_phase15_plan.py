@@ -20,6 +20,7 @@ from app.models.workflow import (CorrectionRequest, NotificationDeliveryAttempt,
 from app.schemas.fdr import FDRCreate
 from app.services import outbox_service
 from app.services import local_execution_service
+from app.services import verification_service
 from app.services.fdr_service import create_fdr
 from app.services.notification_service import stage_for
 from app.services.document_service import store_upload
@@ -99,6 +100,7 @@ def test_local_eager_mode_runs_workflow_without_broker(monkeypatch):
             calls.append(workflow_id)
             async with factory() as worker_session:
                 workflow=await worker_session.get(WorkflowInstance,workflow_id)
+                assert workflow.worker_lease_until.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
                 workflow.execution_state=ExecutionState.WAITING_HUMAN.value
                 await worker_session.commit()
         monkeypatch.setattr(tasks_workflow,'_process_workflow',process_inline)
@@ -114,7 +116,11 @@ def test_local_eager_mode_runs_workflow_without_broker(monkeypatch):
                 maturity_date=date.today()+timedelta(days=365),holder='College'),institution.id,actor.id)
             workflow=await session.scalar(select(WorkflowInstance).where(WorkflowInstance.fdr_id==fdr.id))
             assert workflow
-            assert await local_execution_service.run_inline_workflow_if_enabled(session,fdr.id)
+            workflow.execution_state=ExecutionState.RUNNING.value
+            workflow.worker_lease_until=datetime.now(timezone.utc)+timedelta(minutes=1)
+            await session.flush()
+            assert await local_execution_service.run_inline_workflow_if_enabled(
+                session,fdr.id,resume_active=True)
             assert calls==[workflow.id]
             assert workflow.execution_state==ExecutionState.WAITING_HUMAN.value
             events=list((await session.scalars(select(OutboxEvent).where(
@@ -299,12 +305,14 @@ def test_first_scan_attached_to_existing_fdr_queues_verification_reprocessing(mo
     asyncio.run(run())
 
 
-def test_verification_report_exposes_safe_ocr_workflow_diagnostics():
+def test_verification_report_exposes_safe_ocr_workflow_diagnostics(monkeypatch):
     async def run():
         engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
             connect_args={'check_same_thread':False})
         factory=async_sessionmaker(engine,expire_on_commit=False)
         async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+        monkeypatch.setattr(verification_service,'get_settings',
+            lambda:SimpleNamespace(celery_task_always_eager=False))
         async with factory() as session:
             inst=Institution(aicte_id='P15-OCR-DIAGNOSTIC',name='OCR Diagnostic College',state='Delhi',
                 head_name='P',contact_email='ocr-diagnostic@example.test',contact_phone='9000000014',status='active')

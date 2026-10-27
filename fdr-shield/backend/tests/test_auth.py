@@ -1,8 +1,29 @@
 from app.core.security import hash_password,verify_password,create_access_token,decode_token,generate_totp_secret,verify_totp
+from app.core.config import get_settings
+from app.core.exceptions import AuthError
+from jose import jwt
 import pyotp
+import pytest
 
 def test_password_jwt_and_totp_roundtrip():
     hashed=hash_password('safe-password')
     assert verify_password('safe-password',hashed) and not verify_password('bad',hashed)
     token=create_access_token('12','admin');assert decode_token(token)['sub']=='12'
     secret=generate_totp_secret();assert verify_totp(secret,pyotp.TOTP(secret).now())
+
+
+def test_jwt_type_required_claims_and_reserved_claims_are_enforced():
+    settings=get_settings()
+    token=create_access_token('12','admin')
+    claims=decode_token(token)
+    assert {'sub','role','typ','jti','iat','exp'} <= claims.keys()
+    with pytest.raises(ValueError):
+        create_access_token('12','admin',typ='refresh')
+    claims['typ']='refresh'
+    forged=jwt.encode(claims,settings.jwt_secret,algorithm=settings.jwt_algorithm)
+    with pytest.raises(AuthError):
+        decode_token(forged)
+    claims.pop('jti')
+    malformed=jwt.encode(claims,settings.jwt_secret,algorithm=settings.jwt_algorithm)
+    with pytest.raises(AuthError):
+        decode_token(malformed)

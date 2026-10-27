@@ -99,7 +99,7 @@ Phase 1 adds orthogonal state dimensions while retaining `fdrs.status` as the le
 ### 1.7 Non-functional
 | Concern | Decision |
 |---|---|
-| Security | 15-minute JWT access cookies + rotated DB-backed refresh sessions, CSRF, TOTP MFA, RBAC, presigned URLs 5 min, Argon2id (legacy bcrypt upgrade) |
+| Security | 12-hour JWT access cookies + 30-day rotated DB-backed refresh sessions, CSRF, TOTP MFA, RBAC, presigned URLs 5 min, Argon2id (legacy bcrypt upgrade) |
 | Auditability | Append-only `audit_logs` (user_id, ip, entity, action, delta_changes, timestamp); no update/delete code path |
 | Performance | OCR/emails async in Celery; dashboard stats cached in Redis 60 s; indexes on `maturity_date`, `fdr_number` |
 | Reliability | Idempotent alerts via `(fdr_id, stage)` uniqueness; Celery retries with backoff |

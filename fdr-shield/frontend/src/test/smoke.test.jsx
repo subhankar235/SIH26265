@@ -128,8 +128,8 @@ describe('FDR-Shield UI smoke tests', () => {
       discrepancies:[],
     }}/>);
     expect(screen.getAllByText('OCR unavailable')).toHaveLength(6);
-    expect(screen.getAllByText('Unsupported bank')).toHaveLength(6);
-    expect(screen.getByRole('row',{name:/FDR number AXISFD-123 OCR unavailable Unsupported bank/})).toBeInTheDocument();
+    expect(screen.getAllByText('Not checked (not in demo gateway)')).toHaveLength(6);
+    expect(screen.getByRole('row',{name:/FDR number AXISFD-123 OCR unavailable Not checked \(not in demo gateway\)/})).toBeInTheDocument();
   });
 
   it('explains if OCR is pending, failed, or completed without readable fields', () => {

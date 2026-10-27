@@ -1,15 +1,18 @@
 import asyncio
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+import time
 from types import SimpleNamespace
 
 import pytest
+from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_session
+from app.core.config import get_settings
 from app.core.enums import AccountStatus, Role
 from app.core.exceptions import AccountStatusError, AuthError, PermissionDenied
 from app.core.security import (create_access_token, decode_token, decrypt_mfa_secret,
@@ -162,10 +165,30 @@ def test_portal_login_cookie_session_refresh_reuse_and_csrf():
         assert response.status_code == 200
         assert 'access_token' not in response.json()
         assert response.json()['user']['role'] == 'institution'
-        assert 'httponly' in response.headers.get('set-cookie', '').lower()
+        cookies=response.headers.get_list('set-cookie')
+        access_cookie=next(value.lower() for value in cookies if value.lower().startswith('access_token='))
+        refresh_cookie=next(value.lower() for value in cookies if value.lower().startswith('refresh_token='))
+        csrf_cookie=next(value.lower() for value in cookies if value.lower().startswith('csrf_token='))
+        assert 'httponly' in access_cookie and 'path=/' in access_cookie and 'max-age=43200' in access_cookie
+        assert 'httponly' in refresh_cookie and 'path=/api/v1/auth' in refresh_cookie and 'max-age=2592000' in refresh_cookie
+        assert 'httponly' not in csrf_cookie and 'samesite=lax' in csrf_cookie
+        assert response.json()['csrf_token']
         assert client.get('/api/v1/auth/me').json()['email'] == 'college@example.test'
         assert client.get('/api/v1/dashboard/institution').status_code == 200
         assert client.get('/api/v1/dashboard/bureau').status_code == 403
+
+        # Expired access cookies must be recoverable via the valid, DB-backed refresh session.
+        current_claims=decode_token(client.cookies.get('access_token'))
+        current_claims['exp']=int(time.time())-10
+        expired_access=jwt.encode(current_claims,get_settings().jwt_secret,algorithm=get_settings().jwt_algorithm)
+        client.cookies.set('access_token',expired_access)
+        assert client.get('/api/v1/auth/me').status_code==401
+        csrf=client.cookies.get('csrf_token')
+        refreshed=client.post('/api/v1/auth/refresh',headers={'X-CSRF-Token':csrf})
+        assert refreshed.status_code==200
+        assert refreshed.json()['user']['email']=='college@example.test'
+        assert refreshed.json()['csrf_token']
+        assert client.get('/api/v1/auth/me').json()['email']=='college@example.test'
 
         official_client = TestClient(app)
         official_response = official_client.post('/api/v1/auth/login', json={

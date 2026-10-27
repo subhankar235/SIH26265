@@ -1,5 +1,5 @@
 """Opt-in synchronous workflow execution for local development."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +9,10 @@ from app.core.enums import ExecutionState
 from app.models.workflow import OutboxEvent, WorkflowInstance
 
 
-async def run_inline_workflow_if_enabled(session: AsyncSession, fdr_id: int) -> bool:
-    """Run a newly queued workflow inline when local eager mode is enabled."""
+async def run_inline_workflow_if_enabled(
+    session: AsyncSession, fdr_id: int, *, resume_active: bool = False
+) -> bool:
+    """Run a workflow inline when local eager mode is enabled."""
     if not get_settings().celery_task_always_eager:
         return False
 
@@ -26,6 +28,12 @@ async def run_inline_workflow_if_enabled(session: AsyncSession, fdr_id: int) -> 
         ExecutionState.RETRYING.value,
     }:
         return False
+    if resume_active and instance.execution_state in {
+        ExecutionState.RUNNING.value,
+        ExecutionState.RETRYING.value,
+    }:
+        # Local inline recovery is an explicit takeover; do not run a worker alongside it.
+        instance.worker_lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
 
     wake_ids = list(
         (

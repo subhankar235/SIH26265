@@ -160,7 +160,7 @@ Policy (`validate_password_strength`): min 12 chars, not in a common-password li
 **Timing safety:** when the email doesn't exist, still run a dummy `verify_password` against a fixed hash so response time doesn't reveal account existence.
 
 ### Step 4.4 — Token module (`auth/tokens.py`)
-- **Access JWT** claims: `sub` (user id), `role`, `inst` (institution_id or null), `jti`, `iat`, `exp` (15 min), `typ="access"`. Don't put email/PII in it.
+- **Access JWT** claims: `sub` (user id), `role`, `institution_id` (or null), `jti`, `iat`, `exp` (configured lifetime; default 720 minutes), `typ="access"`. Don't put email/PII in it. Refresh tokens are random opaque values stored only as hashes in the database and rotated on use (default lifetime 30 days).
 - **Refresh token**: 256-bit random string (`secrets.token_urlsafe(48)`); store only its SHA-256 in `refresh_token`.
 - **Rotation:** each `/auth/refresh` marks the presented token `used_at`, issues a new one in the same `family_id`.
 - **Reuse detection:** if a token with `used_at` set is presented again → revoke the entire family, audit `TOKEN_REUSE_DETECTED`, force re-login.

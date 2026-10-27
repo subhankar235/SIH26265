@@ -22,8 +22,13 @@ async def get_current_user(request: Request, session:AsyncSession=Depends(get_se
     try: claims=decode_token(token)
     except Exception as e: raise HTTPException(401,'Invalid credentials') from e
     if claims.get('typ') != 'access' or claims.get('mfa_pending'): raise HTTPException(401,'Invalid credentials')
-    user=await session.scalar(select(User).where(User.id==int(claims['sub'])))
+    try:
+        user_id=int(claims['sub'])
+    except (TypeError,ValueError) as exc:
+        raise HTTPException(401,'Invalid credentials') from exc
+    user=await session.scalar(select(User).where(User.id==user_id))
     if not user or not user.is_active or user.status != 'active' or claims.get('ver', 0) != user.session_version: raise HTTPException(401,'Inactive or unknown user')
+    if claims.get('role') != user.role: raise HTTPException(401,'Inactive or unknown user')
     family_id = claims.get('sid')
     if family_id:
         active_family = await session.scalar(select(RefreshToken.id).where(RefreshToken.user_id == user.id,
