@@ -4,6 +4,8 @@ from app.core.exceptions import AuthError
 from jose import jwt
 import pyotp
 import pytest
+from pydantic import ValidationError
+from app.core.config import Settings
 
 def test_password_jwt_and_totp_roundtrip():
     hashed=hash_password('safe-password')
@@ -27,3 +29,16 @@ def test_jwt_type_required_claims_and_reserved_claims_are_enforced():
     malformed=jwt.encode(claims,settings.jwt_secret,algorithm=settings.jwt_algorithm)
     with pytest.raises(AuthError):
         decode_token(malformed)
+
+
+def test_auth_settings_require_a_real_secret_and_secure_production_cookie_policy():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None,jwt_secret='too-short')
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None,jwt_secret='replace-with-a-real-random-secret-123456789',
+            app_env='prod',cookie_secure=False)
+    settings=Settings(_env_file=None,jwt_secret='a-random-test-secret-with-more-than-32-bytes',
+        app_env='prod',cookie_secure=True,frontend_origin='https://portal.example.test',
+        cors_origins='https://portal.example.test',mfa_encryption_key='QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=')
+    assert settings.access_token_minutes==720
+    assert settings.refresh_token_days==30

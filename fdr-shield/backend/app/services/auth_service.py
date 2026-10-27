@@ -81,7 +81,7 @@ async def throttle_public_action(session: AsyncSession, portal: str, email: str,
     await _log_attempt(session, email.lower(), portal, False, 'PUBLIC_ACTION', ip, None)
 
 
-async def login(session: AsyncSession, email: str, password: str, portal: str | None = None,
+async def login(session: AsyncSession, email: str, password: str, portal: str,
                 ip: str | None = None, user_agent: str | None = None) -> dict:
     normalized = email.strip().lower()
     await _check_rate(session, normalized, ip)
@@ -96,10 +96,13 @@ async def login(session: AsyncSession, email: str, password: str, portal: str | 
         user.locked_until = None
         user.failed_login_count = 0
     valid_roles = {role.value for role in Role}
-    # The shared login path resolves authority only from the matched database row.
-    # `portal` remains an optional compatibility constraint for older API clients.
-    expected_role = portal if portal is not None else (user.role if user and user.role in valid_roles else None)
-    audit_portal = portal or (user.role if user and user.role in valid_roles else 'shared')
+    portal_roles = {'institution':Role.INSTITUTION.value,'official':Role.AICTE_OFFICIAL.value,
+        'admin':Role.ADMIN.value,**{role.value:role.value for role in Role}}
+    # Portal is a requested authentication context only; the database role remains
+    # authoritative and must match it before any session is issued.
+    requested_portal=getattr(portal,'value',portal)
+    expected_role=portal_roles.get(requested_portal)
+    audit_portal = requested_portal if requested_portal in portal_roles else 'invalid_portal'
     failure_reason = None
     if not user or not good_password:
         failure_reason = 'INVALID_CREDENTIALS'

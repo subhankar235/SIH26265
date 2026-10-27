@@ -10,7 +10,7 @@ from app.core.deps import get_current_user, get_client_ip
 from app.core.exceptions import AccountStatusError, AuthError, RateLimitError
 from app.core.cookies import (COOKIE_ACCESS, COOKIE_CSRF, COOKIE_REFRESH,
     clear_session_cookies, set_csrf_cookie, set_mfa_cookie, set_session_cookies)
-from app.schemas.auth import (LoginRequest, MfaVerifyRequest, PasswordChangeRequest,
+from app.schemas.auth import (LoginRequest, LoginCredentials, MfaVerifyRequest, PasswordChangeRequest,
     InstitutionRegistrationRequest, ForgotPasswordRequest, TokenBody, ResetPasswordRequest,
     InviteAcceptRequest, OfficialRegistrationRequest)
 from app.schemas.super_admin_setup import SuperAdminSetupRequest
@@ -20,55 +20,69 @@ router = APIRouter()
 logger=logging.getLogger(__name__)
 
 
-async def _shared_login(body: LoginRequest, request: Request,
-                        response: Response, session: AsyncSession) -> dict:
+def _login_error_response(request: Request, status: int, code: str, message: str) -> JSONResponse:
+    payload={'code':code,'message':message}
+    request_id=getattr(request.state,'request_id',None)
+    if request_id: payload['request_id']=request_id
+    response=JSONResponse(status_code=status,content={'error':payload})
+    clear_session_cookies(response)
+    return response
+
+
+async def _shared_login(body: LoginCredentials, request: Request,
+                        response: Response, session: AsyncSession, portal: str) -> dict | JSONResponse:
+    # A portal login replaces the current shared SSO session. Middleware requires
+    # CSRF on login requests so a cross-site request cannot revoke that session.
+    await auth_service.logout(session,request.cookies.get(COOKIE_REFRESH),
+        request.cookies.get(COOKIE_ACCESS),get_client_ip(request))
     try:
-        data = await auth_service.login(session, str(body.email), body.password, None,
+        data = await auth_service.login(session, str(body.email), body.password, portal,
             get_client_ip(request), request.headers.get('user-agent'))
-    except RateLimitError:
+    except RateLimitError as exc:
         await session.commit()
-        raise
-    except AccountStatusError:
+        return _login_error_response(request,429,'RATE_LIMITED',str(exc))
+    except AccountStatusError as exc:
         await session.commit()
-        raise
+        return _login_error_response(request,403,'ACCOUNT_STATUS',str(exc))
     except AuthError:
         await session.commit()  # retain failed-attempt and lockout records
         logger.info('auth_login_rejected',extra={'request_id':getattr(request.state,'request_id',None),
-            'failure_category':'invalid_credentials'})
-        raise AuthError(auth_service.GENERIC_INVALID)
+            'portal':portal,'failure_category':'invalid_credentials_or_wrong_portal'})
+        return _login_error_response(request,401,'INVALID_CREDENTIALS',auth_service.GENERIC_INVALID)
     if data.get('mfa_required'):
-        logger.info('auth_mfa_required',extra={'request_id':getattr(request.state,'request_id',None)})
+        logger.info('auth_mfa_required',extra={'request_id':getattr(request.state,'request_id',None),
+            'portal':portal})
         csrf=set_mfa_cookie(response,data['mfa_token'])
         return {'mfa_required': True,'csrf_token':csrf}
     csrf=set_session_cookies(response, data)
     logger.info('auth_login_succeeded',extra={'request_id':getattr(request.state,'request_id',None),
-        'user_id':data['user']['id'],'role':data['user']['role']})
+        'user_id':data['user']['id'],'role':data['user']['role'],'portal':portal})
     return {'mfa_required': False, 'user': data['user'],'csrf_token':csrf}
 
 
 @router.post('/login')
 async def shared_login(body: LoginRequest, request: Request, response: Response,
                        session: AsyncSession = Depends(get_session)):
-    """Single login endpoint; role is resolved from the matched database account."""
-    return await _shared_login(body, request, response, session)
+    """Authenticate only when the stored role matches the selected portal."""
+    return await _shared_login(body, request, response, session, body.portal)
 
 
 @router.post('/login/institution', include_in_schema=False)
-async def institution_login_compat(body: LoginRequest, request: Request, response: Response,
+async def institution_login_compat(body: LoginCredentials, request: Request, response: Response,
                                    session: AsyncSession = Depends(get_session)):
-    return await _shared_login(body, request, response, session)
+    return await _shared_login(body, request, response, session, 'institution')
 
 
 @router.post('/login/official', include_in_schema=False)
-async def official_login_compat(body: LoginRequest, request: Request, response: Response,
+async def official_login_compat(body: LoginCredentials, request: Request, response: Response,
                                 session: AsyncSession = Depends(get_session)):
-    return await _shared_login(body, request, response, session)
+    return await _shared_login(body, request, response, session, 'official')
 
 
 @router.post('/login/admin', include_in_schema=False)
-async def admin_login_compat(body: LoginRequest, request: Request, response: Response,
+async def admin_login_compat(body: LoginCredentials, request: Request, response: Response,
                              session: AsyncSession = Depends(get_session)):
-    return await _shared_login(body, request, response, session)
+    return await _shared_login(body, request, response, session, 'admin')
 
 
 @router.post('/mfa/verify')

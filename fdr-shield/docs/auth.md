@@ -11,15 +11,16 @@
 |---|---|
 | Auth type | Manual: email/username + password (no third-party login) |
 | Roles | `INSTITUTION`, `AICTE_OFFICIAL`, `ADMIN` (exactly 3) |
-| Login page | One shared login at `/login`; redirects by the database-verified role |
+| Login page | One shared login at `/login`; selected portal is checked against the database-verified role before session issuance |
 | Session | Short-lived access JWT + rotating refresh token, both in **httpOnly cookies** |
 | Password hashing | **argon2id** (fallback bcrypt cost ≥ 12) |
 | Authorization | Enforced on the **backend** for every request; frontend guards are only cosmetic |
 | Data isolation | Institution users can only see their own institution's data |
 
-### Why one `user` table, three login endpoints
+### Portal selection and role binding
 - One table keeps password, lockout, reset and audit logic in one place.
-- Three endpoints (one per portal) mean an Institution user **cannot** log in through the Official portal, even with a correct password. The endpoint checks that the account's role equals the portal's role.
+- The shared login request includes a required portal selector. The server maps that selector to the expected stored role and rejects a valid password from another role.
+- Hidden legacy portal-specific endpoints bind the expected role from their route, not a client-provided role.
 - Wrong-portal and wrong-password both return the **same generic error** so attackers can't learn which accounts/roles exist.
 
 ---
@@ -126,10 +127,10 @@ Justify each in the PR; skip any already present.
 
 ### Step 4.2 — Config (env vars)
 ```
-JWT_SECRET=<long random, from secret manager>
+JWT_SECRET=<random 32+ character value, from secret manager>
 JWT_ALGORITHM=HS256
-ACCESS_TOKEN_MINUTES=15
-REFRESH_TOKEN_DAYS=7
+ACCESS_TOKEN_MINUTES=720
+REFRESH_TOKEN_DAYS=30
 COOKIE_SECURE=true            # false only on localhost
 COOKIE_SAMESITE=lax           # strict if same-site deployment
 COOKIE_DOMAIN=<your domain>

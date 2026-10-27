@@ -6,7 +6,7 @@ from sqlalchemy.pool import StaticPool
 import pytest
 from app.core.database import Base
 from app.core.enums import Role,ExecutionState,LifecycleState,AuthorizationState
-from app.core.exceptions import InvalidStateTransition,NotFound
+from app.core.exceptions import InvalidStateTransition,NotFound,PermissionDenied
 from app.models import FDR,Institution,User
 from app.models.workflow import CommandExecution,OutboxEvent,WorkflowInstance
 from app.services.command_service import interpret,confirm,_interpret_text
@@ -28,7 +28,9 @@ def test_command_interpreter_allowlists_intents_scopes_case_refs_and_confirms_wr
                 role=Role.INSTITUTION.value,institution_id=one.id,status='active',is_active=True)
             official=User(email='cmd-official@example.test',full_name='Official',password_hash='x',
                 role=Role.AICTE_OFFICIAL.value,status='active',is_active=True)
-            session.add_all([institution_user,official]);await session.flush()
+            admin=User(email='cmd-admin@example.test',full_name='Admin',password_hash='x',
+                role=Role.ADMIN.value,status='active',is_active=True)
+            session.add_all([institution_user,official,admin]);await session.flush()
             fdr=FDR(institution_id=two.id,fdr_number='FDR-1024',bank_name='SBI',branch='Main',amount=100,
                 issue_date=date.today(),maturity_date=date.today()+timedelta(days=20),status='submitted',
                 trust_badge='self_declared',declared_data={})
@@ -45,8 +47,14 @@ def test_command_interpreter_allowlists_intents_scopes_case_refs_and_confirms_wr
             assert plan['intent']=='find_maturing' and plan['resolved_targets'][0]['fdr_number']=='FDR-1024'
             assert read_command.requires_confirmation is False
             assert await session.scalar(select(OutboxEvent.id).where(OutboxEvent.event_type=='COMMAND_EXECUTE'))
+            admin_read,_=await interpret(session,admin,'Find FDRs maturing within 30 days','admin-cmd-key-1')
+            assert admin_read.requires_confirmation is False
+            with pytest.raises(PermissionDenied,match='read-only'):
+                await interpret(session,admin,'Prepare reminder drafts','admin-cmd-key-2')
             command,plan=await interpret(session,official,'Pause FDR-1024','official-cmd-key-3')
             assert command.requires_confirmation and command.status=='planned'
+            with pytest.raises(NotFound):
+                await confirm(session,admin,command.id,command.plan_hash)
             fdr.status='verified'
             with pytest.raises(InvalidStateTransition,match='PLAN_CHANGED'):
                 await confirm(session,official,command.id,command.plan_hash)
@@ -89,6 +97,31 @@ def test_command_interpreter_uses_configured_llm_and_parses_structured_intent(mo
     assert interpreter == 'llm-structured'
 
 
+def test_ollama_command_response_fences_and_common_intent_aliases_are_normalized(monkeypatch):
+    from types import SimpleNamespace
+    import app.services.command_service as service
+
+    class Response:
+        def raise_for_status(self): pass
+        def json(self):
+            return {'choices':[{'message':{'content':'```json\n{"action":"filter_fixed_deposits",'
+                '"parameters":{"maturity_window_days":45}}\n```'}}]}
+
+    class Client:
+        def __init__(self,timeout): assert timeout==5
+        async def __aenter__(self): return self
+        async def __aexit__(self,*args): pass
+        async def post(self,*args,**kwargs): return Response()
+
+    monkeypatch.setattr(service,'get_settings',lambda:SimpleNamespace(command_llm_enabled=True,
+        command_llm_api_url='https://ollama.test/v1/chat/completions',command_llm_api_key='test-key',
+        command_llm_model='gemma4:31b',command_llm_timeout=5))
+    monkeypatch.setattr(service.httpx,'AsyncClient',Client)
+    parsed,source=asyncio.run(service._interpret_text('Find FDRs maturing within 45 days'))
+    assert parsed.intent=='find_maturing' and parsed.args=={'days':45}
+    assert source=='llm-structured'
+
+
 def test_command_interpreter_falls_back_when_llm_is_unconfigured_or_offline(monkeypatch):
     from types import SimpleNamespace
     import httpx
@@ -112,6 +145,45 @@ def test_command_interpreter_falls_back_when_llm_is_unconfigured_or_offline(monk
     monkeypatch.setattr(service.httpx, 'AsyncClient', Client)
     parsed, interpreter = asyncio.run(_interpret_text('Find FDRs maturing in 45 days'))
     assert parsed.args == {'days': 45} and interpreter == 'deterministic-allowlist-v1'
+
+
+def test_local_eager_command_runs_without_celery_or_beat(monkeypatch):
+    from types import SimpleNamespace
+    from app.models.workflow import CommandExecution
+    from app.services import command_service, local_execution_service
+
+    class LocalBus:
+        async def broadcast(self,*args,**kwargs): return None
+
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn:await conn.run_sync(Base.metadata.create_all)
+        monkeypatch.setattr(local_execution_service,'get_settings',
+            lambda:SimpleNamespace(celery_task_always_eager=True))
+        monkeypatch.setattr(command_service,'get_event_bus',lambda:LocalBus())
+        async with factory() as session:
+            official=User(email='inline-cmd@example.test',full_name='Official',password_hash='x',
+                role=Role.AICTE_OFFICIAL.value,status='active',is_active=True)
+            session.add(official);await session.flush()
+            command=CommandExecution(user_id=official.id,raw_command='Find FDRs maturing in 30 days',
+                idempotency_key='inline-command-123',interpreted_plan={'tool':'find_fdrs',
+                    'intent':'find_maturing','args':{'days':30},'resolved_targets':[],'state_snapshot':[]},
+                plan_hash='a'*64,authorization_result={'allowed':True,'role':official.role},
+                requires_confirmation=False,status='confirmed',steps=[])
+            session.add(command);await session.flush()
+            wake=OutboxEvent(aggregate_id=str(command.id),event_type='COMMAND_EXECUTE',
+                payload={'command_id':command.id},idempotency_key='inline-command-wake-123',status='pending')
+            session.add(wake);await session.commit()
+
+            assert await local_execution_service.run_inline_command_if_enabled(session,command.id)
+            await session.refresh(command);await session.refresh(wake)
+            assert command.status=='succeeded'
+            assert wake.status=='sent'
+            assert 'found' in command.result_summary
+        await engine.dispose()
+    asyncio.run(run())
 
 
 def test_grounded_assistant_reply_uses_llm_but_falls_back_when_disabled(monkeypatch):

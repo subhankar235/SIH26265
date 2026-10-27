@@ -34,6 +34,10 @@ function isAuthEndpoint(url = '') {
   return /\/auth\/(?:login(?:\/|$)|mfa\/verify(?:\/|$)|logout(?:\/|$)|refresh(?:\/|$)|csrf(?:\/|$)|register(?:\/|$)|verify-email(?:\/|$)|accept-invite(?:\/|$)|forgot-password(?:\/|$)|reset-password(?:\/|$))/.test(url);
 }
 
+function isCsrfExemptEndpoint(url = '') {
+  return /\/auth\/(?:register(?:\/|$)|verify-email(?:\/|$)|accept-invite(?:\/|$)|forgot-password(?:\/|$)|reset-password(?:\/|$))/.test(url);
+}
+
 function portalForPath(path) {
   if (path.startsWith('/institution/')) return 'institution';
   if (path === '/institution') return 'institution';
@@ -98,7 +102,7 @@ function refreshSession() {
 
 client.interceptors.request.use(async (config) => {
   const method = (config.method || 'get').toLowerCase();
-  if (['post', 'put', 'patch', 'delete'].includes(method) && !isAuthEndpoint(config.url)) {
+  if (['post', 'put', 'patch', 'delete'].includes(method) && !isCsrfExemptEndpoint(config.url)) {
     let token = csrfToken();
     if (!token) token = await bootstrapCsrf();
     if (token) config.headers['X-CSRF-Token'] = token;

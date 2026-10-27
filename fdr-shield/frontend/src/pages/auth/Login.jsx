@@ -25,9 +25,11 @@ export default function Login() {
     event.preventDefault();
     if (busy) return;
     setBusy(true); setError('');
+    // Do not leave an in-memory role from a previous portal visible after a failed switch.
+    useAuthStore.getState().clearSession();
     const form = new FormData(event.currentTarget);
     try {
-      const data = await login(String(form.get('email')), String(form.get('password')));
+      const data = await login(String(form.get('email')), String(form.get('password')), selectedPortal.key);
       if (data.mfa_required) {
         navigate('/mfa');
         return;

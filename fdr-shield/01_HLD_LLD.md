@@ -155,7 +155,7 @@ Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discre
 ### 2.2 REST API (prefix `/api/v1`)
 | Method + path | Role | Purpose |
 |---|---|---|
-| POST `/auth/login`, `/auth/refresh`, `/auth/logout`; GET `/auth/me` | any / cookie session | One shared login; backend resolves the role from the account |
+| POST `/auth/login`, `/auth/refresh`, `/auth/logout`; GET `/auth/me`, `/auth/csrf` | any / cookie session | Shared login sends a required portal selector; backend rejects unless it matches the stored role |
 | POST `/auth/register/institution`, `/auth/register/official`, `/auth/register/super-admin`, `/auth/verify-email`, `/auth/forgot-password`, `/auth/reset-password` | public | Email-verified applicant onboarding, secret-gated one-time Super Admin setup, and one-time password recovery |
 | GET `/institutions/registrations`, POST `/institutions/registrations/{id}/decision` | AICTE Official | Primary Institution approval/rejection queue |
 | GET `/admin/registrations`, `/admin/official-registrations`; POST decision/override routes | Super Admin (`admin` stored value) | Official approval, direct Institution decisions, public application overrides |

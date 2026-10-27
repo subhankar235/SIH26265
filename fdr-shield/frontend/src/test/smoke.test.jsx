@@ -17,12 +17,14 @@ import DiscrepancyBoard from '../pages/bureau/DiscrepancyBoard';
 import InstitutionsList from '../pages/bureau/InstitutionsList';
 import ScrutinySplitView from '../pages/bureau/ScrutinySplitView';
 import ScrutinyQueue from '../pages/bureau/ScrutinyQueue';
+import WorkflowControlRoom from '../pages/bureau/WorkflowControlRoom';
 import { InstitutionFdrDetail } from '../pages/institution/InstitutionOperations';
 import AdminAccounts from '../pages/admin/AdminAccounts';
 import { AdminAlerts, AdminRoles } from '../pages/admin/AdminPhase12';
 import AppRoutes from '../routes/AppRoutes';
 import Layout from '../components/layout/Layout';
 import { useAuthStore } from '../store/authStore';
+import App from '../App';
 
 vi.mock('../api/client', () => ({ client: { post: vi.fn(), get: vi.fn(), patch: vi.fn() } }));
 
@@ -383,6 +385,9 @@ describe('FDR-Shield UI smoke tests', () => {
     fireEvent.change(screen.getByLabelText('Password'), {target:{value:'DemoPass123!'}});
     fireEvent.click(screen.getByRole('button', {name:'Continue securely'}));
     await waitFor(() => expect(screen.getByText('Institution portal ready')).toBeInTheDocument());
+    expect(client.post).toHaveBeenCalledWith('/auth/login',{
+      email:'school@example.test',password:'DemoPass123!',portal:'institution',
+    });
   });
 
   it('reports a backend connection error separately from invalid credentials', async () => {
@@ -545,6 +550,43 @@ describe('FDR-Shield UI smoke tests', () => {
     render(<MemoryRouter initialEntries={['/admin']}><Layout><AppRoutes/></Layout></MemoryRouter>);
     expect(await screen.findByRole('heading',{name:'Sign in to FDR-Shield'})).toBeInTheDocument();
     expect(screen.queryByRole('navigation',{name:'Main navigation'})).not.toBeInTheDocument();
+  });
+
+  it('loads every workflow page before calculating control-room counts', async () => {
+    const first=Array.from({length:100},(_,i)=>({id:i+1,fdr_id:i+1,is_synthetic:false,
+      lifecycle_state:'submitted',execution_state:'running',authorization_state:'pending',
+      current_node:'extract_document',updated_at:'2026-10-27T12:00:00Z'}));
+    const second=[{id:101,fdr_id:999,is_synthetic:false,lifecycle_state:'submitted',
+      execution_state:'blocked',authorization_state:'pending',current_node:'validate_fields',
+      updated_at:'2026-10-27T12:00:00Z'}];
+    client.get.mockImplementation((url,config)=>url==='/workflows'
+      ? Promise.resolve({data:config.params.page===1?first:second})
+      : Promise.reject(new Error(`Unexpected GET ${url}`)));
+    renderWithQueryClient(<MemoryRouter><WorkflowControlRoom/></MemoryRouter>);
+    expect(await screen.findByText('FDR #999')).toBeInTheDocument();
+    expect(client.get).toHaveBeenCalledWith('/workflows',{params:{page:1,size:100}});
+    expect(client.get).toHaveBeenCalledWith('/workflows',{params:{page:2,size:100}});
+  });
+
+  it('restores the authenticated role after a protected-page reload using the backend session', async () => {
+    useAuthStore.setState({user:null,status:'loading'});
+    client.get.mockImplementation(url=>url==='/auth/csrf'
+      ? Promise.resolve({data:{csrf_token:'bootstrap-csrf'}})
+      : url==='/auth/me'
+        ? Promise.resolve({data:{id:14,role:'aicte_official',must_change_password:false}})
+        : Promise.reject(new Error(`Unexpected GET ${url}`)));
+    render(<MemoryRouter initialEntries={['/account/change-password']}><App/></MemoryRouter>);
+    expect(await screen.findByRole('heading',{name:'Change password'})).toBeInTheDocument();
+    expect(client.get.mock.calls.slice(-2)).toEqual([['/auth/csrf'],['/auth/me']]);
+    expect(useAuthStore.getState().status).toBe('authenticated');
+  });
+
+  it('keeps session restoration pending instead of clearing auth state on a temporary API outage', async () => {
+    useAuthStore.setState({user:null,status:'loading'});
+    client.get.mockRejectedValueOnce(new Error('temporary network failure'));
+    render(<MemoryRouter initialEntries={['/account/change-password']}><App/></MemoryRouter>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not verify your session');
+    expect(useAuthStore.getState().status).toBe('unavailable');
   });
 
   it('routes a selected role from the three-choice login to the same shared login form', async () => {

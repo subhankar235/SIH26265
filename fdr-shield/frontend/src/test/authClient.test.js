@@ -81,8 +81,13 @@ describe('cookie session API client', () => {
 
   it('excludes login, logout, and refresh endpoints from recursive refresh attempts', async () => {
     let refreshCalls = 0;
-    api.defaults.adapter = (config) => reject(config, 401);
+    let loginCsrf='';
+    api.defaults.adapter = (config) => {
+      if(config.url==='/auth/login')loginCsrf=config.headers.get('X-CSRF-Token');
+      return reject(config, 401);
+    };
     refresh.defaults.adapter = (config) => {
+      if (config.url === '/auth/csrf') return Promise.resolve(response(config, { csrf_token: 'login-csrf' }));
       if (config.url === '/auth/refresh') refreshCalls += 1;
       return reject(config, 401);
     };
@@ -90,6 +95,7 @@ describe('cookie session API client', () => {
     await expect(api.post('/auth/logout', {})).rejects.toMatchObject({ response: { status: 401 } });
     await expect(api.post('/auth/refresh', {})).rejects.toMatchObject({ response: { status: 401 } });
     expect(refreshCalls).toBe(0);
+    expect(loginCsrf).toBe('login-csrf');
   });
 
   it('retries an original 401 at most once after refresh', async () => {

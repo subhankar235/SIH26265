@@ -6,7 +6,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session, SessionLocal
-from app.core.deps import Pagination, get_current_user, pagination, require_roles
+from app.core.deps import Pagination, get_current_user, is_current_access_session, pagination, require_roles
+from app.core.security import decode_token
 from app.core.enums import ExecutionState, Role
 from app.core.exceptions import InvalidStateTransition, NotFound
 from app.models.fdr import FDR
@@ -250,11 +251,14 @@ async def stream_workflow(workflow_id: int, request: Request, after: int = 0,
                 return
 
             # Live user and authorization revocation check
+            try: live_claims=decode_token(request.cookies.get('access_token',''))
+            except Exception: live_claims={}
             async with SessionLocal() as check_session:
                 live_user = await check_session.get(User, user.id)
                 state = await check_session.get(WorkflowInstance, workflow_id)
+                session_valid=bool(live_user and await is_current_access_session(check_session,live_user,live_claims))
 
-            if not live_user or not live_user.is_active or live_user.status != 'active' or not state:
+            if not live_user or not state or not session_valid:
                 yield 'event: stream.revoked\ndata: {}\n\n'
                 return
 
@@ -322,8 +326,12 @@ async def stream_exceptions(request: Request, after: int = 0,
 
             async with SessionLocal() as check_session:
                 live_user = await check_session.get(User, user.id)
+                try: live_claims=decode_token(request.cookies.get('access_token',''))
+                except Exception: live_claims={}
+                authorized=bool(live_user and await is_current_access_session(check_session,live_user,live_claims)
+                    and live_user.role in {Role.AICTE_OFFICIAL.value,Role.ADMIN.value})
 
-            if not live_user or not live_user.is_active or live_user.status != 'active' or live_user.role not in {'aicte_official', 'admin'}:
+            if not authorized:
                 yield 'event: stream.revoked\ndata: {}\n\n'
                 return
 

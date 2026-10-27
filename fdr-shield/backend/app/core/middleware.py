@@ -25,15 +25,15 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
-    """Double-submit CSRF protection for cookie-authenticated unsafe requests."""
+    """Double-submit CSRF protection; login also requires a token to prevent login CSRF."""
     async def dispatch(self, request, call_next):
         if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
             path = request.url.path
-            public_auth = path.endswith(('/auth/login', '/auth/login/institution', '/auth/login/official', '/auth/login/admin',
-                '/auth/register/institution', '/auth/register/official', '/auth/register/super-admin', '/auth/forgot-password', '/auth/reset-password',
+            login_request = path.endswith(('/auth/login', '/auth/login/institution', '/auth/login/official', '/auth/login/admin'))
+            public_auth = path.endswith(('/auth/register/institution', '/auth/register/official', '/auth/register/super-admin', '/auth/forgot-password', '/auth/reset-password',
                 '/auth/verify-email', '/auth/accept-invite'))
             cookie_session = any(request.cookies.get(name) for name in ('access_token', 'refresh_token', 'mfa_token'))
-            if cookie_session and not public_auth:
+            if login_request or (cookie_session and not public_auth):
                 cookie = request.cookies.get('csrf_token', '')
                 header = request.headers.get('x-csrf-token', '')
                 if not cookie or not header or cookie != header or not verify_csrf_token(cookie):

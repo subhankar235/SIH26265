@@ -171,7 +171,7 @@ Dashboard: BureauDashboard -> useBureauDashboard -> /dashboard/bureau
 | Anything that mutates state -> `audit_service.record` | `(user_id, entity, entity_id, action, ip, delta{field:[old,new]})` |
 
 ### 4.3 Auth flow
-One shared login page at `/login` -> `POST /api/v1/auth/login` -> backend derives role from the matched user row -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Legacy role-specific login URLs redirect to `/login`; protected APIs independently check active account status and `require_roles`.
+One shared login page at `/login` -> `POST /api/v1/auth/login` with a required `portal` selector -> backend verifies that selector against the matched user's stored role -> HttpOnly session cookies (or short-lived MFA cookie) -> in-memory profile from `/auth/me`; Axios sends credentials and CSRF header. Legacy role-specific login URLs redirect to the shared form; hidden compatibility endpoints bind directly to their portal. Protected APIs independently check active account status and `require_roles`.
 
 ## 5. Suggested build order (hackathon, 3 days)
 **Day 1 (skeleton that runs):** `core/*` -> `models` + migration -> `auth` router -> `seed.py` -> frontend `Login`, `authStore`, `RoleGuard`, `Layout`.
