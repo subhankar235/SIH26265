@@ -16,6 +16,7 @@ import SuperAdminSetup from '../pages/auth/SuperAdminSetup';
 import DiscrepancyBoard from '../pages/bureau/DiscrepancyBoard';
 import InstitutionsList from '../pages/bureau/InstitutionsList';
 import ScrutinySplitView from '../pages/bureau/ScrutinySplitView';
+import ScrutinyQueue from '../pages/bureau/ScrutinyQueue';
 import { InstitutionFdrDetail } from '../pages/institution/InstitutionOperations';
 import AdminAccounts from '../pages/admin/AdminAccounts';
 import { AdminAlerts, AdminRoles } from '../pages/admin/AdminPhase12';
@@ -40,6 +41,29 @@ describe('FDR-Shield UI smoke tests', () => {
   it('shows a semantic trust badge', () => {
     render(<TrustBadge badge="mismatch"/>);
     expect(screen.getByText('Mismatch')).toHaveClass('badge-red');
+  });
+
+  it('includes FDRs being processed and loads beyond the first 100 cases in the scrutiny queue', async () => {
+    const olderCases=Array.from({length:100},(_,index)=>({
+      id:index+1, fdr_number:`OLD-${index+1}`, lifecycle_state:'accepted',
+      status:'verified', maturity_date:'2030-01-01', amount:100,
+    }));
+    client.get.mockImplementation((url,config) => {
+      if(url==='/fdrs'){
+        return Promise.resolve({data:config.params.page===1?olderCases:[{
+          id:101,fdr_number:'NEW-SUBMISSION',lifecycle_state:'extraction_pending',
+          status:'submitted',maturity_date:'2030-01-01',amount:100,trust_badge:'self_declared',
+        }]});
+      }
+      if(url==='/workflows/recommendations')return Promise.resolve({data:{recommendations:[]}});
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    renderWithQueryClient(<MemoryRouter><Routes><Route path="*" element={<ScrutinyQueue/>}/></Routes></MemoryRouter>);
+
+    expect(await screen.findByText('NEW-SUBMISSION')).toBeInTheDocument();
+    expect(client.get).toHaveBeenCalledWith('/fdrs',{params:{page:1,size:100}});
+    expect(client.get).toHaveBeenCalledWith('/fdrs',{params:{page:2,size:100}});
   });
 
   it('accepts a supported upload and reports the selected file', () => {
@@ -97,6 +121,17 @@ describe('FDR-Shield UI smoke tests', () => {
     expect(screen.getByRole('row', { name: /Amount/ })).toHaveClass('bg-red-50');
   });
 
+  it('labels unavailable OCR and bank values instead of leaving evidence cells blank', () => {
+    render(<SplitViewer fdr={{fdr_number:'FDR-AXIS',declared_data:{fdr_number:'AXISFD-123'}}} report={{
+      ocr:{confidence:0,document_format:'not_checked'},
+      bank:{found:false,verification_status:'unsupported_bank'},
+      discrepancies:[],
+    }}/>);
+    expect(screen.getAllByText('OCR unavailable')).toHaveLength(6);
+    expect(screen.getAllByText('Unsupported bank')).toHaveLength(6);
+    expect(screen.getByRole('row',{name:/FDR number AXISFD-123 OCR unavailable Unsupported bank/})).toBeInTheDocument();
+  });
+
   it('shows a missing scrutiny scan and allows a manual check', async () => {
     let documentAttempts = 0;
     client.get.mockImplementation((url) => {
@@ -126,6 +161,39 @@ describe('FDR-Shield UI smoke tests', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check document again' }));
     expect(await screen.findByTitle('FDR scan')).toHaveAttribute('src', 'https://storage.test/fdr-15.pdf');
     expect(documentAttempts).toBe(2);
+  });
+
+  it('lets an official retry OCR against the stored scan', async () => {
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/15') return Promise.resolve({ data: {
+        id: 15, fdr_number: 'FDR-15', bank_name: 'AXIS BANK', branch: 'Main',
+        status: 'submitted', execution_state: 'completed', trust_badge: 'self_declared',
+        declared_data: {},
+      } });
+      if (url === '/verification/15/report') return Promise.resolve({ data: {
+        ocr: { confidence: 0, document_format: 'not_checked' }, bank: null, discrepancies: [],
+      } });
+      if (url === '/fdrs/15/presigned-url') return Promise.resolve({ data: { url: 'https://storage.test/fdr-15.pdf' } });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    client.post.mockResolvedValueOnce({ data: { queued: true, workflow_id: 21, execution_version: 2 } });
+
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={['/official/review/15']}>
+        <Routes><Route path="/official/review/:id" element={<ScrutinySplitView/>}/></Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry OCR and demo-bank check' }));
+    await waitFor(() => expect(client.post).toHaveBeenCalledWith(
+      '/verification/15/run',
+      null,
+      expect.objectContaining({
+        params: { reason: 'Official requested OCR and bank gateway retry from scrutiny review.' },
+        headers: expect.objectContaining({ 'Idempotency-Key': expect.stringMatching(/^scrutiny-retry-15-/) }),
+      }),
+    ));
+    expect(screen.getByRole('button', { name: 'Retry OCR and demo-bank check' })).toBeInTheDocument();
   });
 
   it('automatically finds a scan uploaded after the scrutiny page was opened', async () => {

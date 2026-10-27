@@ -6,15 +6,22 @@ const labels = { fdr_number:'FDR number', bank_name:'Bank', holder:'Holder', amo
 export default function SplitViewer({ fileUrl, fdr, report }) {
   const declared = fdr?.declared_data || {}, ocr = report?.ocr || {}, bank = report?.bank || {};
   const mismatches = new Set((report?.discrepancies || []).map((item) => item.field));
-  const val = (field, value) => {
-    if (value == null || value === '') return '—';
+  const val = (field, value, missing = '—') => {
+    if (value == null || value === '') return missing;
     if (field === 'amount') return formatINR(value);
     if (field.endsWith('_date')) return formatDate(value);
     return String(value);
   };
+  const extractionMissing = ocr.confidence > 0 ? 'Not extracted' : 'OCR unavailable';
+  const bankMissing = {
+    unsupported_bank: 'Unsupported bank',
+    no_match: 'No demo match',
+    gateway_unavailable: 'Gateway unavailable',
+    matched: 'Not returned',
+  }[bank.verification_status] || 'Not checked';
   const rows = [
     ['fdr_number', declared.fdr_number, ocr.fdr_number, bank.found ? fdr?.fdr_number : null],
-    ['bank_name', declared.bank_name, ocr.bank_name, bank.found ? fdr?.bank_name : null],
+    ['bank_name', declared.bank_name, ocr.bank_name, null],
     ['holder', declared.holder ?? declared.holder_name, ocr.holder_name, bank.holder],
     ['amount', declared.amount, ocr.amount, bank.amount],
     ['issue_date', declared.issue_date, ocr.issue_date, null],
@@ -49,7 +56,7 @@ export default function SplitViewer({ fileUrl, fdr, report }) {
       </p>
       <div className="overflow-x-auto"><table className="w-full min-w-[540px] text-left text-sm">
         <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500"><tr>{['Field','Institution-declared','Document extraction','Demo bank gateway'].map(x=><th key={x} className="px-3 py-3">{x}</th>)}</tr></thead>
-        <tbody className="divide-y">{rows.map(([field,d,o,b])=>{const mismatch=mismatches.has(field);return <tr key={field} className={mismatch?'bg-red-50 text-red-900':''}><th scope="row" className="px-3 py-3 font-medium">{labels[field]}{mismatch&&<AlertTriangle aria-label="Mismatch" size={14} className="ml-1 inline text-red-700"/>}</th><td className="px-3 py-3 tabular-nums">{val(field,d)}</td><td className="px-3 py-3 tabular-nums">{val(field,o)}</td><td className="px-3 py-3 tabular-nums">{val(field,b)}</td></tr>})}</tbody>
+        <tbody className="divide-y">{rows.map(([field,d,o,b])=>{const mismatch=mismatches.has(field);return <tr key={field} className={mismatch?'bg-red-50 text-red-900':''}><th scope="row" className="px-3 py-3 font-medium">{labels[field]}{mismatch&&<AlertTriangle aria-label="Mismatch" size={14} className="ml-1 inline text-red-700"/>}</th><td className="px-3 py-3 tabular-nums">{val(field,d)}</td><td className="px-3 py-3 tabular-nums">{val(field,o,extractionMissing)}</td><td className="px-3 py-3 tabular-nums">{bank.found?val(field,b,'Not returned'):bankMissing}</td></tr>})}</tbody>
       </table></div>
       <p className="mt-3 flex items-center gap-2 text-xs text-slate-600">{bank.found&&<CheckCircle2 size={14} className="text-amber-700"/>}{bankMessage}</p>
     </section>
