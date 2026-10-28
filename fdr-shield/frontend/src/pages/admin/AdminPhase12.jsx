@@ -7,11 +7,8 @@ import { logout as logoutRequest } from '../../api/auth.api';
 import { useAuthStore } from '../../store/authStore';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import { EmptyState, ErrorState, LoadingState, LiveStatus, useToast } from '../../components/common/PageStates';
-<<<<<<< HEAD
 import { promptRoleAssignment } from '../../utils/roleAssignment';
-=======
 import { Activity, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Check, CircleHelp, FileText, GitBranch, LockKeyhole, LogOut, ShieldCheck, TriangleAlert, Workflow } from 'lucide-react';
->>>>>>> KD
 
 export function AdminRoles(){
  const[role,setRole]=useState('');const qc=useQueryClient(),toast=useToast();const q=useQuery({queryKey:['admin-users',role],queryFn:()=>client.get('/admin/users',{params:role?{role}:undefined}).then(r=>r.data)});

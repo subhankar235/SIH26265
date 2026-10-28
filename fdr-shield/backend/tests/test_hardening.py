@@ -78,7 +78,7 @@ def test_local_storage_rejects_tampered_signed_url(tmp_path, monkeypatch):
 def test_s3_presigned_url_uses_browser_reachable_endpoint(monkeypatch):
     config = SimpleNamespace(storage_backend='minio', s3_endpoint='http://minio:9000',
         s3_public_endpoint='http://localhost:9000', s3_access_key='access',
-        s3_secret_key='secret', s3_bucket='fdr-documents')
+        s3_secret_key='secret', s3_region='us-east-1', s3_bucket='fdr-documents')
     endpoints = []
 
     class FakeS3:
@@ -98,6 +98,28 @@ def test_s3_presigned_url_uses_browser_reachable_endpoint(monkeypatch):
     url = storage_client.presign('1/fdr_scan/receipt.png')
     assert endpoints == ['http://localhost:9000']
     assert url.startswith('http://localhost:9000/')
+
+
+def test_s3_client_uses_region_and_path_style_for_neon_storage(monkeypatch):
+    config = SimpleNamespace(storage_backend='s3',
+        s3_endpoint='https://branch.storage.aws.neon.tech', s3_public_endpoint='',
+        s3_access_key='access', s3_secret_key='secret', s3_region='us-east-2',
+        s3_bucket='fdr-documents')
+    captured = {}
+
+    def fake_boto_client(service, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(storage_client, 'get_settings', lambda: config)
+    monkeypatch.setattr(storage_client.boto3, 'client', fake_boto_client)
+    storage_client._client()
+
+    assert captured['endpoint_url'] == config.s3_endpoint
+    assert captured['region_name'] == 'us-east-2'
+    assert captured['config'].s3['addressing_style'] == 'path'
+    assert captured['aws_access_key_id'] == 'access'
+    assert captured['aws_secret_access_key'] == 'secret'
 
 
 def test_dashboard_redis_cache_uses_bounded_timeouts_and_closes_client(monkeypatch):

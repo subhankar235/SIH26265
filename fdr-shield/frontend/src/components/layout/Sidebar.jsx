@@ -4,9 +4,8 @@ import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
 import { Activity, AlertTriangle, Bell, BrainCircuit, Building2, ClipboardCheck, Files, GitBranch, LayoutDashboard, MessageSquareText, PanelLeftClose, PanelLeftOpen, Search, ScrollText, Settings, ShieldCheck, Upload, Wallet, X } from 'lucide-react';
 
-<<<<<<< HEAD
 const institutionLinks = [
-  ['', 'Overview', LayoutDashboard], ['/fdrs/new', 'Submit FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/renewals', 'Renewals', Activity], ['/releases', 'Releases', Wallet], ['/notifications', 'Notifications', Bell],
+  ['', 'Overview', LayoutDashboard], ['/fdrs/new', 'Submit FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/renewals', 'Renewals', Activity], ['/releases', 'Releases', Wallet], ['/notifications', 'Notifications', Bell], ['/command', 'Command Center', MessageSquareText],
 ];
 const bureauLinks = [
   ['', 'Overview', LayoutDashboard], ['/queue', 'Scrutiny queue', ShieldCheck], ['/registrations', 'Institution applications', ClipboardCheck], ['/discrepancies', 'Discrepancies', AlertTriangle], ['/approvals', 'Approvals', ClipboardCheck], ['/control-room', 'Control room', GitBranch], ['/exceptions', 'Exception inbox', AlertTriangle], ['/command', 'Command Center', MessageSquareText], ['/institutions', 'Institutions', Building2], ['/audit', 'Audit logs', ScrollText],
@@ -14,24 +13,19 @@ const bureauLinks = [
 const adminLinks = [
   ['', 'Overview', LayoutDashboard], ['/users', 'User accounts', ShieldCheck], ['/roles', 'Role assignments', Settings], ['/registrations', 'Institution applications', Building2], ['/official-registrations', 'Official applications', ClipboardCheck], ['/institutions', 'Institutions', Building2], ['/rules', 'Automation rules', Settings], ['/ml', 'ML governance', BrainCircuit], ['/alerts', 'Alerts', Bell], ['/notifications', 'Delivery monitor', Activity], ['/jobs', 'Failed jobs', AlertTriangle], ['/health', 'System health', Activity], ['/ops-agent', 'Operations agent', MessageSquareText], ['/command', 'Command Center', MessageSquareText], ['/audit', 'Audit logs', ScrollText],
 ];
-=======
-const institutionLinks = [['', 'Overview', LayoutDashboard], ['/fdrs/new', 'Submit FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/renewals', 'Renewals', Activity], ['/releases', 'Releases', Wallet], ['/notifications', 'Notifications', Bell]];
-const bureauLinks = [['', 'Overview', LayoutDashboard], ['/queue', 'Scrutiny queue', ShieldCheck], ['/registrations', 'Institution applications', ClipboardCheck], ['/discrepancies', 'Discrepancies', AlertTriangle], ['/approvals', 'Approvals', ClipboardCheck], ['/control-room', 'Control room', GitBranch], ['/exceptions', 'Exception inbox', AlertTriangle], ['/command', 'Command Center', MessageSquareText], ['/institutions', 'Institutions', Building2], ['/audit', 'Audit logs', ScrollText]];
-const adminLinks = [['', 'Overview', LayoutDashboard], ['/users', 'User accounts', ShieldCheck], ['/roles', 'Role assignments', Settings], ['/registrations', 'Institution applications', Building2], ['/official-registrations', 'Official applications', ClipboardCheck], ['/institutions', 'Institutions', Building2], ['/rules', 'Automation rules', Settings], ['/ml', 'ML governance', BrainCircuit], ['/alerts', 'Alerts', Bell], ['/jobs', 'Failed jobs', AlertTriangle], ['/health', 'System health', Activity], ['/ops-agent', 'Operations agent', GitBranch], ['/audit', 'Audit logs', ScrollText]];
 
 const categoryPlans = {
-  institution: [['Triggers', [0, 1, 2]], ['Actions', [3, 4, 5]], ['Logic', []], ['Webhooks', []], ['Events', []]],
+  institution: [['Triggers', [0, 1, 2]], ['Actions', [3, 4, 5]], ['Logic', [6]], ['Webhooks', []], ['Events', []]],
   aicte_official: [['Triggers', [0, 1, 2]], ['Actions', [3, 4]], ['Logic', [5, 7]], ['Webhooks', [6]], ['Events', [8, 9]]],
-  admin: [['Triggers', [0, 3, 4]], ['Actions', [1, 5, 8]], ['Logic', [2, 6, 7]], ['Webhooks', [9, 11]], ['Events', [10, 12]]],
+  admin: [['Triggers', [0, 3, 4]], ['Actions', [1, 5, 8]], ['Logic', [2, 6, 7]], ['Webhooks', [9, 11, 13]], ['Events', [10, 12, 14]]],
 };
 
 const tileTones = ['bg-[#EAF3FF] text-[#3182F6]', 'bg-[#E3F5EC] text-[#16845A]', 'bg-[#FFF4D6] text-[#A56B00]', 'bg-[#EAF3FF] text-[#3182F6]', 'bg-[#E3F5EC] text-[#16845A]'];
 const railShortcuts = {
-  institution: [['', 'Overview', LayoutDashboard], ['/fdrs/new', 'Submit FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/renewals', 'Renewals', Activity]],
+  institution: [['', 'Overview', LayoutDashboard], ['/fdrs/new', 'Submit FDR', Upload], ['/fdrs', 'My FDRs', Files], ['/renewals', 'Renewals', Activity], ['/command', 'Command Center', MessageSquareText]],
   aicte_official: [['', 'Overview', LayoutDashboard], ['/queue', 'Scrutiny queue', ShieldCheck], ['/discrepancies', 'Discrepancies', AlertTriangle], ['/approvals', 'Approvals', ClipboardCheck]],
   admin: [['', 'Overview', LayoutDashboard], ['/users', 'User accounts', ShieldCheck], ['/rules', 'Automation rules', Settings], ['/health', 'System health', Activity]],
 };
->>>>>>> KD
 
 export default function Sidebar() {
   const { user } = useAuthStore();

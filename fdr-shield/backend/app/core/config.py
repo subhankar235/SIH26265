@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     s3_public_endpoint: str = ''
     s3_access_key: str = 'minioadmin'
     s3_secret_key: str = 'minioadmin'
+    s3_region: str = 'us-east-1'
     s3_bucket: str = 'fdr-documents'
     mock_bank_url: str = 'http://localhost:9100'
     smtp_host: str = 'localhost'

@@ -166,7 +166,7 @@ async def record_human_decision(session: AsyncSession, fdr: FDR, actor_id: int,
         idempotency_key=idempotency_key))
     await publish(session,instance.id,'approval.recorded',{'fdr_id':fdr.id,'actor_user_id':actor_id,
         'decision':decision,'request_type':request_type},
-        f'approval:{instance.id}:{idempotency_key or actor_id+int(datetime.now(timezone.utc).timestamp())}')
+        f'approval:{instance.id}:{idempotency_key or f"{actor_id}{int(datetime.now(timezone.utc).timestamp())}"}')
 
 
 async def start_new_execution(session: AsyncSession, fdr: FDR, actor_id: int, reason: str,

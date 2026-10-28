@@ -83,6 +83,29 @@ describe('NidhiTrack UI smoke tests', () => {
     expect(screen.queryByText(/Execution plan · Tool:/)).not.toBeInTheDocument();
   });
 
+  it('renders grounded FDR answers and keeps structured database evidence available', async () => {
+    client.get.mockImplementation((url) => {
+      if (url === '/commands') return Promise.resolve({ data: [{
+        id: 8, raw_command: 'What is recorded for FDR-1024?', status: 'succeeded',
+      }] });
+      if (url === '/commands/8') return Promise.resolve({ data: {
+        command_id: 8, status: 'succeeded', result_summary: 'Recorded amount is 1000.',
+        steps: [{ tool: 'get_fdr_details', result: {
+          answer: 'FDR-1024 has a recorded amount of 1000.',
+          answer_source: 'llm-grounded',
+          data: { fdr: { fdr_number: 'FDR-1024', amount: 1000 } },
+        } }],
+      } });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    renderWithQueryClient(<MemoryRouter><CommandCenter/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /What is recorded for FDR-1024/ }));
+    expect(await screen.findByText('FDR-1024 has a recorded amount of 1000.')).toBeInTheDocument();
+    expect(screen.getByText('LLM answer grounded in authorized database results')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show structured database result'));
+    expect(screen.getByText(/"fdr_number": "FDR-1024"/)).toBeInTheDocument();
+  });
+
   it('accepts a supported upload and reports the selected file', () => {
     render(<FileDropzone required/>);
     fireEvent.change(screen.getByLabelText(/Choose a PDF or image scan/), { target: { files: [new File(['%PDF-1.4'], 'receipt.pdf', { type: 'application/pdf' })] } });
@@ -221,7 +244,7 @@ describe('NidhiTrack UI smoke tests', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Retry OCR and demo-bank check' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan document & check bank' }));
     await waitFor(() => expect(client.post).toHaveBeenCalledWith(
       '/verification/15/run',
       null,
@@ -230,7 +253,40 @@ describe('NidhiTrack UI smoke tests', () => {
         headers: expect.objectContaining({ 'Idempotency-Key': expect.stringMatching(/^scrutiny-retry-15-/) }),
       }),
     ));
-    expect(screen.getByRole('button', { name: 'Retry OCR and demo-bank check' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Scan document & check bank' })).toBeInTheDocument();
+  });
+
+  it('keeps scan action available after OCR has already completed', async () => {
+    client.get.mockImplementation((url) => {
+      if (url === '/fdrs/16') return Promise.resolve({ data: {
+        id: 16, fdr_number: 'FDR-16', bank_name: 'SBI', branch: 'Main',
+        status: 'verified', execution_state: 'completed', trust_badge: 'mock_verified',
+        declared_data: {},
+      } });
+      if (url === '/verification/16/report') return Promise.resolve({ data: {
+        ocr: { confidence: 0.9, document_format: 'fdr_like' },
+        bank: { found: true }, discrepancies: [],
+        processing: { execution_state: 'completed', extraction_status: 'succeeded',
+          extraction_completed_at: '2026-10-28T01:00:00Z' },
+      } });
+      if (url === '/fdrs/16/presigned-url') return Promise.resolve({ data: { url: 'https://storage.test/fdr-16.pdf' } });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    client.post.mockResolvedValueOnce({ data: { queued: true, workflow_id: 22, execution_version: 2 } });
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={['/official/review/16']}>
+        <Routes><Route path="/official/review/:id" element={<ScrutinySplitView/>}/></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/Last OCR completed/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Scan again' }));
+    await waitFor(() => expect(client.post).toHaveBeenCalledWith(
+      '/verification/16/run',
+      null,
+      expect.objectContaining({
+        params: { reason: 'Official requested OCR and bank gateway retry from scrutiny review.' },
+      }),
+    ));
   });
 
   it('automatically finds a scan uploaded after the scrutiny page was opened', async () => {
@@ -398,7 +454,7 @@ describe('NidhiTrack UI smoke tests', () => {
     render(<MemoryRouter initialEntries={['/login?portal=institution']}><Routes><Route path="/login" element={<Login/>}/><Route path="/institution" element={<p>Institution portal ready</p>}/></Routes></MemoryRouter>);
     fireEvent.change(screen.getByLabelText('Email address'), {target:{value:'school@example.test'}});
     fireEvent.change(screen.getByLabelText('Password'), {target:{value:'DemoPass123!'}});
-    fireEvent.click(screen.getByRole('button', {name:'Continue securely'}));
+    fireEvent.click(screen.getByRole('button', {name:'Secure access'}));
     await waitFor(() => expect(screen.getByText('Institution portal ready')).toBeInTheDocument());
     expect(client.post).toHaveBeenCalledWith('/auth/login',{
       email:'school@example.test',password:'DemoPass123!',portal:'institution',
@@ -410,7 +466,7 @@ describe('NidhiTrack UI smoke tests', () => {
     render(<MemoryRouter initialEntries={['/login?portal=institution']}><Routes><Route path="/login" element={<Login/>}/></Routes></MemoryRouter>);
     fireEvent.change(screen.getByLabelText('Email address'), {target:{value:'school@example.test'}});
     fireEvent.change(screen.getByLabelText('Password'), {target:{value:'DemoPass123!'}});
-    fireEvent.click(screen.getByRole('button', {name:'Continue securely'}));
+    fireEvent.click(screen.getByRole('button', {name:'Secure access'}));
     expect(await screen.findByRole('alert')).toHaveTextContent('Cannot reach the login service');
   });
 
@@ -435,6 +491,13 @@ describe('NidhiTrack UI smoke tests', () => {
     render(<MemoryRouter><Sidebar /></MemoryRouter>);
     expect(screen.getByRole('link', { name: 'Delivery monitor' })).toHaveAttribute('href', '/admin/notifications');
     expect(screen.getByRole('link', { name: 'Command Center' })).toHaveAttribute('href', '/admin/command');
+  });
+
+  it('exposes the scoped Command Center in institution navigation', () => {
+    useAuthStore.getState().setUser({ role: 'institution' });
+    render(<MemoryRouter><Sidebar /></MemoryRouter>);
+    expect(screen.getAllByRole('link', { name: 'Command Center' }).map(link => link.getAttribute('href')))
+      .toEqual(['/institution/command', '/institution/command']);
   });
 
   it('surfaces FDR-list errors and disables test-alert submission', async () => {
@@ -492,7 +555,7 @@ describe('NidhiTrack UI smoke tests', () => {
     expect(password).toHaveAttribute('type','password');
     fireEvent.change(screen.getByLabelText('Email address'),{target:{value:'root@example.test'}});
     fireEvent.change(password,{target:{value:'not-rendered-in-dom'}});
-    fireEvent.click(screen.getByRole('button',{name:'Continue securely'}));
+    fireEvent.click(screen.getByRole('button',{name:'Secure access'}));
     expect(screen.getByRole('button',{name:'Signing in…'})).toBeDisabled();
     expect(client.post).toHaveBeenCalledTimes(1);
     finish({data:{mfa_required:false,user:{id:2,email:'root@example.test',role:'admin'}}});
@@ -519,7 +582,7 @@ describe('NidhiTrack UI smoke tests', () => {
     render(<MemoryRouter initialEntries={[{pathname:'/login',search:'?portal=institution',state:{from:{pathname:'/admin'}}}]}><Routes><Route path="/login" element={<Login/>}/><Route path="/institution" element={<p>Institution portal ready</p>}/><Route path="/admin" element={<p>Super Admin private</p>}/></Routes></MemoryRouter>);
     fireEvent.change(screen.getByLabelText('Email address'),{target:{value:'college@example.test'}});
     fireEvent.change(screen.getByLabelText('Password'),{target:{value:'Safe-Password-2026'}});
-    fireEvent.click(screen.getByRole('button',{name:'Continue securely'}));
+    fireEvent.click(screen.getByRole('button',{name:'Secure access'}));
     await screen.findByText('Institution portal ready');
     expect(screen.queryByText('Super Admin private')).not.toBeInTheDocument();
   });
@@ -540,12 +603,18 @@ describe('NidhiTrack UI smoke tests', () => {
     }));
   });
 
-  it('offers three centralized portal choices and groups each allowed signup beside its role', () => {
+  it('offers three centralized portal choices and groups each allowed signup beside its role', async () => {
     render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<Login/>}/></Routes></MemoryRouter>);
-    expect(screen.getByRole('heading',{name:'Choose your portal'})).toBeInTheDocument();
-    expect(screen.getByRole('link',{name:'Register institution'})).toHaveAttribute('href','/institution/register');
-    expect(screen.getByRole('link',{name:'Apply as AICTE Official'})).toHaveAttribute('href','/official/register');
-    expect(screen.getByRole('link',{name:'First-time setup only'})).toHaveAttribute('href','/super-admin/setup');
+    expect(screen.getByRole('heading',{name:'Select your role'})).toBeInTheDocument();
+    const cases = [
+      ['Institutional User','Register institution','/institution/register'],
+      ['AICTE Official','Apply as AICTE Official','/official/register'],
+      ['Super Admin','First-time setup only','/super-admin/setup'],
+    ];
+    for (const [portal, linkName, href] of cases) {
+      fireEvent.click(screen.getByRole('button',{name:portal}));
+      await waitFor(() => expect(screen.getByRole('link',{name:linkName})).toHaveAttribute('href',href));
+    }
   });
 
   it.each(['/institution/login','/official/login','/admin/login'])('%s routes to the one shared login screen', async path => {
@@ -567,20 +636,30 @@ describe('NidhiTrack UI smoke tests', () => {
     expect(screen.queryByRole('navigation',{name:'Main navigation'})).not.toBeInTheDocument();
   });
 
-  it('loads every workflow page before calculating control-room counts', async () => {
+  it('uses server-side control-room counts and loads workflows with a stable cursor', async () => {
     const first=Array.from({length:100},(_,i)=>({id:i+1,fdr_id:i+1,is_synthetic:false,
       lifecycle_state:'submitted',execution_state:'running',authorization_state:'pending',
       current_node:'extract_document',updated_at:'2026-10-27T12:00:00Z'}));
     const second=[{id:101,fdr_id:999,is_synthetic:false,lifecycle_state:'submitted',
       execution_state:'blocked',authorization_state:'pending',current_node:'validate_fields',
       updated_at:'2026-10-27T12:00:00Z'}];
-    client.get.mockImplementation((url,config)=>url==='/workflows'
-      ? Promise.resolve({data:config.params.page===1?first:second})
-      : Promise.reject(new Error(`Unexpected GET ${url}`)));
+    client.get.mockImplementation((url,config)=>{
+      if(url==='/workflows/control-room/summary')return Promise.resolve({data:{
+        total_workflows:101,total_fdrs:102,fdrs_without_workflow:1,
+        execution_state_counts:{running:100,blocked:1,failed:0,waiting_human:0,paused:0},
+      }});
+      if(url==='/workflows/control-room')return Promise.resolve({data:config.params.before_id
+        ?{items:second,has_more:false,next_before_id:null}
+        :{items:first,has_more:true,next_before_id:1}});
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
     renderWithQueryClient(<MemoryRouter><WorkflowControlRoom/></MemoryRouter>);
+    expect(await screen.findByText('100')).toBeInTheDocument();
+    expect(screen.getByText(/1 FDR record\(s\) have no workflow instance/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Load more workflows'}));
     expect(await screen.findByText('FDR #999')).toBeInTheDocument();
-    expect(client.get).toHaveBeenCalledWith('/workflows',{params:{page:1,size:100}});
-    expect(client.get).toHaveBeenCalledWith('/workflows',{params:{page:2,size:100}});
+    expect(client.get).toHaveBeenCalledWith('/workflows/control-room',{params:{page_size:100}});
+    expect(client.get).toHaveBeenCalledWith('/workflows/control-room',{params:{page_size:100,before_id:1}});
   });
 
   it('restores the authenticated role after a protected-page reload using the backend session', async () => {
@@ -606,7 +685,7 @@ describe('NidhiTrack UI smoke tests', () => {
 
   it('routes a selected role from the three-choice login to the same shared login form', async () => {
     render(<MemoryRouter initialEntries={['/login']}><Routes><Route path="/login" element={<Login/>}/></Routes></MemoryRouter>);
-    fireEvent.click(screen.getAllByRole('button',{name:'Continue to sign in'})[1]);
+    fireEvent.click(screen.getByRole('button',{name:'AICTE Official'}));
     expect(await screen.findByRole('heading',{name:'Sign in to NidhiTrack'})).toBeInTheDocument();
     expect(screen.getByText('AICTE Official')).toBeInTheDocument();
   });

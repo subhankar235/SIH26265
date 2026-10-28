@@ -19,7 +19,7 @@ from app.services import command_service
 from app.services.event_bus import get_event_bus
 
 router = APIRouter()
-COMMAND_ACTORS=require_roles(Role.AICTE_OFFICIAL,Role.ADMIN)
+COMMAND_ACTORS=require_roles(Role.INSTITUTION,Role.AICTE_OFFICIAL,Role.ADMIN)
 
 
 @router.post('/interpret', status_code=201)
@@ -32,9 +32,11 @@ async def interpret_command(
     from app.services.rate_limit_service import enforce_rate_limit
     from app.core.config import get_settings
     await enforce_rate_limit('commands',f'{user.id}:{get_client_ip(request)}',get_settings().rate_limit_commands_per_minute,60)
-    command, plan = await command_service.interpret(session, user, body.text, body.idempotency_key)
+    command, plan = await command_service.interpret(session,user,body.text,body.idempotency_key,
+        body.conversation_id)
     if command is None:
-        return {'mode': 'chat', 'reply': plan['reply'], 'interpreter': plan['interpreter']}
+        return {'mode':'chat','reply':plan['reply'],'interpreter':plan['interpreter'],
+            'conversation_id':plan.get('conversation_id'),'message_id':plan.get('message_id')}
     from app.services.local_execution_service import run_inline_command_if_enabled
     ran_inline=await run_inline_command_if_enabled(session,command.id)
     if ran_inline: await session.refresh(command)
@@ -90,23 +92,31 @@ async def cancel_command(
 
 @router.get('')
 async def command_history(
+    conversation_id: str | None = None,
     page: Pagination = Depends(pagination),
     session: AsyncSession = Depends(get_session),
     user = Depends(COMMAND_ACTORS)
 ):
     query = select(CommandExecution).order_by(CommandExecution.created_at.desc())
-    if user.role != Role.ADMIN.value:
+    if conversation_id is not None:
+        query=query.where(CommandExecution.user_id==user.id,
+            CommandExecution.conversation_id==conversation_id)
+    elif user.role != Role.ADMIN.value:
         query = query.where(CommandExecution.user_id == user.id)
     rows = list((await session.scalars(query.offset(page.skip).limit(page.limit))).all())
     return [
         {
             'id': row.id,
+            'mode':(row.interpreted_plan or {}).get('mode','action'),
+            'conversation_id':row.conversation_id,
             'raw_command': row.raw_command,
             'intent': (row.interpreted_plan or {}).get('intent'),
             'tool': (row.interpreted_plan or {}).get('tool'),
             'status': row.status,
             'requires_confirmation': row.requires_confirmation,
             'result_summary': row.result_summary,
+            'assistant_reply':row.result_summary if (row.interpreted_plan or {}).get('mode')=='chat' else None,
+            'interpreter':(row.interpreted_plan or {}).get('interpreter'),
             'created_at': row.created_at,
             'updated_at': row.updated_at,
         }
@@ -175,7 +185,7 @@ async def command_stream(
                 live_user = await check_session.get(User, user.id)
                 live_command = await check_session.get(CommandExecution, command_id)
                 session_valid=bool(live_user and await is_current_access_session(check_session,live_user,live_claims)
-                    and live_user.role in {Role.AICTE_OFFICIAL.value,Role.ADMIN.value})
+                    and live_user.role in {Role.INSTITUTION.value,Role.AICTE_OFFICIAL.value,Role.ADMIN.value})
 
             if not session_valid:
                 yield 'event: stream.revoked\ndata: {}\n\n'

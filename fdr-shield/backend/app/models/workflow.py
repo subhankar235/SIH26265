@@ -239,6 +239,7 @@ class CommandExecution(Base):
         Index('ix_command_actor_created', 'user_id', 'created_at'))
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     raw_command: Mapped[str] = mapped_column(Text, nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     interpreted_plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)

@@ -42,7 +42,7 @@ const InstitutionDetail = lazy(() => import('../pages/institution/InstitutionOpe
   MLGovernance = lazy(() => import('../pages/admin/MLGovernance'));
 
 function InstitutionRoutes() {
-  return <RoleGuard roles={['institution']}><><Routes><Route index element={<ID/>}/><Route path="upload" element={<Navigate to="/institution/fdrs/new" replace/>}/><Route path="fdrs/new" element={<Upload/>}/><Route path="fdrs" element={<Fdrs/>}/><Route path="fdrs/:id" element={<InstitutionDetail/>}/><Route path="renewals" element={<InstitutionRenewals/>}/><Route path="releases" element={<Refund/>}/><Route path="refunds" element={<Navigate to="/institution/releases" replace/>}/><Route path="notifications" element={<InstitutionNotifications/>}/><Route path="*" element={<Navigate to="/institution" replace/>}/></Routes><InstitutionAssistant/></></RoleGuard>;
+  return <RoleGuard roles={['institution']}><><Routes><Route index element={<ID/>}/><Route path="upload" element={<Navigate to="/institution/fdrs/new" replace/>}/><Route path="fdrs/new" element={<Upload/>}/><Route path="fdrs" element={<Fdrs/>}/><Route path="fdrs/:id" element={<InstitutionDetail/>}/><Route path="renewals" element={<InstitutionRenewals/>}/><Route path="releases" element={<Refund/>}/><Route path="refunds" element={<Navigate to="/institution/releases" replace/>}/><Route path="notifications" element={<InstitutionNotifications/>}/><Route path="command" element={<CommandCenter portalLabel="Institution · Read-only Command Center"/>}/><Route path="*" element={<Navigate to="/institution" replace/>}/></Routes><InstitutionAssistant/></></RoleGuard>;
 }
 
 function OfficialRoutes() {

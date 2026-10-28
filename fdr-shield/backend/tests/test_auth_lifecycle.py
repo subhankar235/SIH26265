@@ -274,7 +274,7 @@ def test_three_portal_login_matrix_rejects_cross_portal_credentials_and_stale_se
                     assert response.json()['user']['role']==actual_role
                     assert client.get('/api/v1/auth/me').json()['role']==actual_role
                     command_access=client.get('/api/v1/commands').status_code
-                    assert command_access==(403 if actual_role==Role.INSTITUTION.value else 200)
+                    assert command_access==200
                     # A valid refresh preserves the account's stored role and cannot elevate it.
                     csrf=client.cookies.get('csrf_token')
                     refreshed=client.post('/api/v1/auth/refresh',headers={'X-CSRF-Token':csrf})

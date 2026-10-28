@@ -39,6 +39,8 @@ async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | N
                 if extraction_node and extraction_node.status == 'failed' else None,
             'extraction_confidence': (extraction_node.output_ref or {}).get('confidence')
                 if extraction_node and extraction_node.status == 'succeeded' else None,
+            'extraction_completed_at': extraction_node.finished_at.isoformat()
+                if extraction_node and extraction_node.finished_at else None,
         }
         if get_settings().celery_task_always_eager:
             processing['local_inline_enabled'] = True

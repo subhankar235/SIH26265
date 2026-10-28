@@ -6,12 +6,21 @@ import hashlib
 import hmac
 from pathlib import Path
 from datetime import datetime, timezone
+from botocore.config import Config
 from app.core.config import get_settings
 
 logger=logging.getLogger(__name__)
 
 def _client(endpoint_url=None):
- s=get_settings();return boto3.client('s3',endpoint_url=endpoint_url or s.s3_endpoint,aws_access_key_id=s.s3_access_key,aws_secret_access_key=s.s3_secret_key)
+ s=get_settings()
+ return boto3.client(
+  's3',
+  endpoint_url=endpoint_url or s.s3_endpoint,
+  region_name=s.s3_region,
+  aws_access_key_id=s.s3_access_key,
+  aws_secret_access_key=s.s3_secret_key,
+  config=Config(s3={'addressing_style':'path'}),
+ )
 def ensure_bucket()->None:
  s=get_settings()
  if s.storage_backend == 'local':
@@ -31,9 +40,9 @@ def ensure_bucket()->None:
    except Exception as create_error:
     last_error=create_error
     if attempt<5:
-     logger.warning('MinIO not ready (attempt %s/6); retrying',attempt+1)
+     logger.warning('S3-compatible storage not ready (attempt %s/6); retrying',attempt+1)
      time.sleep(min(1.0+attempt,4.0))
- if last_error: raise RuntimeError('Could not reach MinIO or create the document bucket after retries') from last_error
+ if last_error: raise RuntimeError('Could not reach S3-compatible storage or create the document bucket after retries') from last_error
 def put(key:str,data:bytes,content_type:str)->None:
  if get_settings().storage_backend == 'local':
   path=(Path(get_settings().storage_local_path)/key).resolve();root=Path(get_settings().storage_local_path).resolve()

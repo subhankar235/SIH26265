@@ -46,7 +46,6 @@ export default function Login() {
   async function submit(event) {
     event.preventDefault();
     if (busy) return;
-<<<<<<< HEAD
     setBusy(true); setError('');
     // Do not leave an in-memory role from a previous portal visible after a failed switch.
     useAuthStore.getState().clearSession();
@@ -68,19 +67,6 @@ export default function Login() {
       const internalPath = requestedPath.startsWith('/') && !requestedPath.startsWith('//') &&
         rolePrefixes.some(prefix => requestedPath === prefix || requestedPath.startsWith(`${prefix}/`));
       const destination = internalPath ? requestedPath : defaultPath;
-=======
-    setBusy(true);
-    setError('');
-    const form = new FormData(event.currentTarget);
-    try {
-      const data = await login(String(form.get('email')), String(form.get('password')));
-      if (data.mfa_required) { navigate('/mfa'); return; }
-      setUser(data.user);
-      const defaultPath = data.user.role === 'institution' ? '/institution' : data.user.role === 'admin' ? '/admin' : '/official';
-      const requestedPath = location.state?.from?.pathname || '';
-      const expectedPrefix = `${defaultPath}/`;
-      const destination = requestedPath === defaultPath || requestedPath.startsWith(expectedPrefix) ? requestedPath : defaultPath;
->>>>>>> KD
       navigate(destination, { replace: true });
     } catch (err) {
       const status = err.response?.status;

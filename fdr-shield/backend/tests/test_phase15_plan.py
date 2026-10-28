@@ -341,6 +341,7 @@ def test_verification_report_exposes_safe_ocr_workflow_diagnostics(monkeypatch):
                 'extraction_status':'failed',
                 'extraction_error_code':'TransientFailure',
                 'extraction_confidence':None,
+                'extraction_completed_at':None,
             }
             assert 'private provider detail' not in str(report)
         await engine.dispose()
