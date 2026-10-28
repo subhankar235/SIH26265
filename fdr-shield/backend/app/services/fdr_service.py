@@ -44,11 +44,11 @@ async def transition(session: AsyncSession, fdr_id: int, new_status: FDRStatus, 
     if target in {FDRStatus.VERIFIED.value, FDRStatus.MISMATCH.value} and not (remarks and remarks.strip()):
         raise InvalidStateTransition('An official scrutiny rationale is required for approval or correction request.')
     old=f.status; f.status=target
-    if target in {FDRStatus.VERIFIED.value, FDRStatus.MISMATCH.value}:
-        f.verification_level = VerificationLevel.HUMAN_SCRUTINIZED.value
     instance = await sync_legacy_status(session, f, actor_id=user_id,
         event_type='OFFICIAL_FDR_DECISION' if target in {FDRStatus.VERIFIED.value, FDRStatus.MISMATCH.value} else 'OFFICIAL_REVIEW_STARTED' if target == FDRStatus.UNDER_SCRUTINY.value else 'FDR_STATUS_CHANGED',
         previous_status=old)
+    if target in {FDRStatus.VERIFIED.value, FDRStatus.MISMATCH.value}:
+        f.verification_level = VerificationLevel.HUMAN_SCRUTINIZED.value
     if target == FDRStatus.VERIFIED.value:
         instance.authorization_state = 'approved'
         await record_human_decision(session, f, user_id, 'aicte_official', decision_override or 'approve', remarks.strip(), idempotency_key=approval_idempotency_key)

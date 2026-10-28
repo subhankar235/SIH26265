@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from '../../api/client';
 import { EmptyState, ErrorState, LoadingState, useToast } from '../../components/common/PageStates';
+import { promptRoleAssignment } from '../../utils/roleAssignment';
 
 export default function AdminAccounts({ registrations = false, officialRegistrations = false }) {
   const [error, setError] = useState('');
@@ -140,7 +141,10 @@ export default function AdminAccounts({ registrations = false, officialRegistrat
               <button disabled={action.isPending} onClick={() => action.mutate({id:row.id,kind:'revoke-sessions'})} className="rounded border px-2 py-1">Revoke sessions</button>
               <button disabled={updateRole.isPending} onClick={() => {
                 const next = window.prompt('Role: institution, aicte_official, or admin', row.role);
-                if (next && ['institution','aicte_official','admin'].includes(next)) updateRole.mutate({id:row.id,role:next,institution_id:row.institution_id});
+                if (next) {
+                  const assignment = promptRoleAssignment(row.email, row.role, row.institution_id, next);
+                  if (assignment) updateRole.mutate({id:row.id,...assignment});
+                }
               }} className="rounded border px-2 py-1">Change role</button>
             </>}
           </div></td>

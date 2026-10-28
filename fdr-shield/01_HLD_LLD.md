@@ -1,4 +1,4 @@
-# FDR-Shield: HLD & LLD
+# NidhiTrack: HLD & LLD
 
 AI-powered centralized Security Deposit & FDR management portal for AICTE.
 Stack: **FastAPI + React (Vite)**, PostgreSQL, Redis + Celery, MinIO (S3), optional OCR/LLM providers, **demo bank gateway**. The Compose example configures Ollama Cloud for OCR; the separate agent LLM provider is disabled until configured. Without usable provider credentials, manual field entry and deterministic assistant/ML fallbacks remain available. The default installation has no torch/GPU/ML dependencies.
@@ -99,7 +99,7 @@ Phase 1 adds orthogonal state dimensions while retaining `fdrs.status` as the le
 ### 1.7 Non-functional
 | Concern | Decision |
 |---|---|
-| Security | 15-minute JWT access cookies + rotated DB-backed refresh sessions, CSRF, TOTP MFA, RBAC, presigned URLs 5 min, Argon2id (legacy bcrypt upgrade) |
+| Security | 12-hour JWT access cookies + 30-day rotated DB-backed refresh sessions, CSRF, TOTP MFA, RBAC, presigned URLs 5 min, Argon2id (legacy bcrypt upgrade) |
 | Auditability | Append-only `audit_logs` (user_id, ip, entity, action, delta_changes, timestamp); no update/delete code path |
 | Performance | OCR/emails async in Celery; dashboard stats cached in Redis 60 s; indexes on `maturity_date`, `fdr_number` |
 | Reliability | Idempotent alerts via `(fdr_id, stage)` uniqueness; Celery retries with backoff |
@@ -155,7 +155,7 @@ Relations: Institution 1-N FDR/User; FDR 1-N Document / VerificationRun / Discre
 ### 2.2 REST API (prefix `/api/v1`)
 | Method + path | Role | Purpose |
 |---|---|---|
-| POST `/auth/login`, `/auth/refresh`, `/auth/logout`; GET `/auth/me` | any / cookie session | One shared login; backend resolves the role from the account |
+| POST `/auth/login`, `/auth/refresh`, `/auth/logout`; GET `/auth/me`, `/auth/csrf` | any / cookie session | Shared login sends a required portal selector; backend rejects unless it matches the stored role |
 | POST `/auth/register/institution`, `/auth/register/official`, `/auth/register/super-admin`, `/auth/verify-email`, `/auth/forgot-password`, `/auth/reset-password` | public | Email-verified applicant onboarding, secret-gated one-time Super Admin setup, and one-time password recovery |
 | GET `/institutions/registrations`, POST `/institutions/registrations/{id}/decision` | AICTE Official | Primary Institution approval/rejection queue |
 | GET `/admin/registrations`, `/admin/official-registrations`; POST decision/override routes | Super Admin (`admin` stored value) | Official approval, direct Institution decisions, public application overrides |
@@ -205,7 +205,7 @@ elif bank.found and bank.status == ACTIVE -> 🟢 BANK_VERIFIED (FDR status VERI
 else                                      -> 🟡 SELF_DECLARED
 ```
 
-**OCR extraction and authenticity**: `FdrExtractor.extract(pages)` returns seven nullable fields (`fdr_number`, `bank_name`, `branch`, `holder_name`, `amount`, `issue_date`, `maturity_date`); format verdict/reason are private to the engine. Branch is extracted only when explicitly labeled and is never inferred from an IFSC code or address. With `OCR_FORMAT_CHECK=true`, Ollama receives the three genuine bank format references from `backend/reference_formats/{sbi,hdfc,pnb}` before at most two candidate pages (max 1600 px). Exact known-negative image hashes are rejected before a model call; other candidates are judged against reference layout and fields. The format verdict is diagnostic and does not discard readable field values; extracted values remain unverified and require user confirmation and normal backend validation. Missing reference files log a warning and fall back to extraction. `OCR_REFERENCE_DIR` defaults to `reference_formats`, resolved from the backend root. Bare Settings default to `OCR_ENGINE=disabled`; Compose selects `ollama_vision` and the API model name `gemma4:31b`. Temperature remains zero with one retry on invalid JSON. Dates normalize to ISO-8601; confidence is the populated-field fraction. The OCR engine interface stays unchanged so future CNN adapters can plug in.
+**OCR extraction and format screening**: `FdrExtractor.extract(pages)` returns the seven nullable document fields (`fdr_number`, `bank_name`, `branch`, `holder_name`, `amount`, `issue_date`, `maturity_date`) and may include optional `document_format` / `format_reason` advisory metadata. With `OCR_FORMAT_CHECK=true`, Ollama screens up to two candidate pages (max 1600 px) for a bank-neutral FDR-like document structure; it does not compare the candidate against a specific bank template. Results are `fdr_like`, `not_fdr_like`, or `uncertain`, and are shown in upload preview and official review. This visual screen is not evidence that a bank issued the receipt, that an account exists, or that funds are genuine. OCR extraction and field comparison continue even for a negative/uncertain format result; extracted values remain unverified and require user confirmation and normal backend validation. Exact known-negative image hashes are rejected before a model call. `OCR_REFERENCE_DIR` defaults to `reference_formats`, resolved from the backend root, and is used only for the known-negative fixtures. Bare Settings default to `OCR_ENGINE=disabled`; Compose selects `ollama_vision` and the API model name `gemma4:31b`. Temperature remains zero with one retry on invalid JSON. Dates normalize to ISO-8601; confidence is the populated-field fraction. Offline OCR adapters extract fields but report format screening as not checked.
 
 **Adding a CNN OCR adapter**: implement the `FdrExtractor` protocol in `app/integrations/ocr/cnn_engine.py`, keep all model/runtime dependencies optional, add a selector branch to `get_engine()`, and add mocked adapter contract tests. Do not add the heavy runtime to the default Docker build.
 

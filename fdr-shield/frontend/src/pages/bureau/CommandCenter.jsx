@@ -1,34 +1,74 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from '../../api/client';
+import { useAuthStore } from '../../store/authStore';
 
-export default function CommandCenter({ adminMode = false }) {
+function getConversationId(userId){
+  const key=`fdr-command-conversation:${userId||'session'}`;
+  let value=sessionStorage.getItem(key);
+  if(!value){value=crypto.randomUUID();sessionStorage.setItem(key,value);}
+  return value;
+}
+
+export default function CommandCenter({ adminMode = false, portalLabel }) {
   const [text, setText] = useState('');
   const [active, setActive] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
   const [progress, setProgress] = useState(null);
   const [sseActive, setSseActive] = useState(false);
   const qc = useQueryClient();
+  const userId=useAuthStore(state=>state.user?.id);
+  const [conversationId]=useState(()=>getConversationId(userId));
 
   const history = useQuery({
-    queryKey: ['command-history'],
-    queryFn: () => client.get('/commands').then((r) => r.data),
+    queryKey: ['command-history',conversationId],
+    queryFn: () => client.get('/commands',{params:{conversation_id:conversationId,page:1,size:100}}).then((r) => r.data),
     refetchInterval: 5000,
   });
 
+  useEffect(()=>{
+    if(!history.data)return;
+    setChatMessages([...history.data].reverse().map(item=>({
+      question:item.raw_command,
+      reply:item.mode==='chat'?item.assistant_reply:(item.result_summary||`Request status: ${item.status}.`),
+      interpreter:item.interpreter,
+      mode:item.mode,
+      commandId:item.id,
+    })));
+  },[history.data]);
+
   const interpret = useMutation({
     mutationFn: (body) => client.post('/commands/interpret', body),
-    onSuccess: ({ data }) => {
+    onSuccess: ({ data }, variables) => {
+      if (data.mode === 'chat') {
+        setChatMessages((messages) => {
+          const pendingIndex=messages.findLastIndex(message=>message.mode==='pending'&&message.question===variables.text);
+          const reply={question:variables.text,reply:data.reply,interpreter:data.interpreter,
+            mode:'chat',commandId:data.message_id};
+          if(pendingIndex<0)return [...messages,reply];
+          const next=[...messages];next[pendingIndex]=reply;return next;
+        });
+        qc.invalidateQueries({queryKey:['command-history',conversationId]});
+        setActive(null);
+        setProgress(null);
+        return;
+      }
       setActive(data);
-      setProgress(data.queued ? { command_id: data.command_id, status: data.status, queued: true } : null);
-      qc.invalidateQueries({ queryKey: ['command-history'] });
+      setProgress(data.command_id ? { command_id: data.command_id, status: data.status,
+        queued: Boolean(data.queued), result_summary: data.result_summary } : null);
+      qc.invalidateQueries({ queryKey: ['command-history',conversationId] });
     },
+    onError:(_error,variables)=>setChatMessages(messages=>messages.map(message=>
+      message.mode==='pending'&&message.question===variables.text
+        ? {...message,mode:'failed',reply:'The request could not be processed. Check the error above and retry.'}
+        : message)),
   });
 
   const confirm = useMutation({
     mutationFn: () => client.post(`/commands/${active.command_id}/confirm`, { plan_hash: active.plan_hash }),
     onSuccess: ({ data }) => {
       setProgress(data);
-      qc.invalidateQueries({ queryKey: ['command-history'] });
+      qc.invalidateQueries({ queryKey: ['command-history',conversationId] });
     },
   });
 
@@ -38,7 +78,7 @@ export default function CommandCenter({ adminMode = false }) {
     }),
     onSuccess: ({ data }) => {
       setProgress((prev) => ({ ...prev, status: data.status }));
-      qc.invalidateQueries({ queryKey: ['command-history'] });
+      qc.invalidateQueries({ queryKey: ['command-history',conversationId] });
     },
   });
 
@@ -97,7 +137,11 @@ export default function CommandCenter({ adminMode = false }) {
 
   function submit(e) {
     e.preventDefault();
-    interpret.mutate({ text, idempotency_key: crypto.randomUUID() });
+    const request=text.trim();
+    if(!request)return;
+    setChatMessages(messages=>[...messages,{question:request,reply:'',mode:'pending'}]);
+    setText('');
+    interpret.mutate({text:request,idempotency_key:crypto.randomUUID(),conversation_id:conversationId});
   }
 
   // Parse Step 9.4 plan contract: [{step, tool, resolved_targets, effect_summary, requires_confirmation}]
@@ -112,7 +156,7 @@ export default function CommandCenter({ adminMode = false }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">
-            {adminMode ? 'Admin · Read-only command subset' : 'AICTE Official · Natural-Language Command Center'}
+            {portalLabel || (adminMode ? 'Super Admin · Read-only command subset' : 'AICTE Official · Natural-Language Command Center')}
           </p>
           <h1 className="mb-2 mt-1 text-3xl font-bold">Command Center</h1>
         </div>
@@ -124,19 +168,20 @@ export default function CommandCenter({ adminMode = false }) {
       </div>
 
       <p className="mb-5 max-w-3xl text-slate-600">
-        Type instructions in natural language. Commands follow strict policy validation, server-side entity resolution,
-        and allowlisted tool execution. Destructive and mutating operations require an explicit plan confirmation.
+        Ask in your own words about authorized FDR details, verification observations, discrepancies, or workflow status.
+        Answers use records you are authorized to see; the assistant cannot certify that an FDR is genuine.
+        Supported changes use allowlisted tools and require confirmation where appropriate.
       </p>
 
       <form onSubmit={submit} className="rounded-xl border bg-white p-5">
         <label className="block text-sm font-semibold">
-          Instruction
+          Ask a question or describe an FDR task
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             className="mt-2 min-h-24 w-full rounded-lg border p-3"
-            placeholder="Show cases waiting for correction"
-            minLength={3}
+            placeholder="What are the recorded details and unresolved discrepancies for FDR-1024?"
+            minLength={1}
             maxLength={2000}
             required
           />
@@ -146,25 +191,8 @@ export default function CommandCenter({ adminMode = false }) {
             disabled={interpret.isPending}
             className="rounded-lg bg-indigo-950 px-4 py-2 font-semibold text-white disabled:opacity-50"
           >
-            {interpret.isPending ? 'Interpreting…' : 'Build plan'}
+            {interpret.isPending ? 'Thinking…' : 'Send'}
           </button>
-          {[
-            'Find FDRs maturing within 30 days',
-            'Show cases waiting for correction',
-            'Show cases awaiting my approval',
-            'Prepare reminder drafts for maturing FDRs',
-            'Explain why FDR-1024 is blocked',
-            'Escalate cases waiting for correction',
-          ].map((example) => (
-            <button
-              key={example}
-              type="button"
-              onClick={() => setText(example)}
-              className="rounded-full border px-3 py-2 text-xs hover:bg-slate-50"
-            >
-              {example}
-            </button>
-          ))}
         </div>
         {interpret.isError && (
           <p role="alert" className="mt-3 text-sm text-red-700">
@@ -175,6 +203,20 @@ export default function CommandCenter({ adminMode = false }) {
         )}
       </form>
 
+      {chatMessages.length > 0 && (
+        <section className="mt-5 space-y-3" aria-label="Assistant conversation" aria-live="polite">
+          {chatMessages.map((message, index) => (
+            <article key={`${index}-${message.question}`} className="rounded-xl border bg-white p-4">
+              <p className="text-sm font-semibold text-slate-700">You: {message.question}</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-900">Assistant: {message.reply||'Working…'}</p>
+              {message.interpreter === 'deterministic-chat-fallback' && (
+                <p className="mt-2 text-xs text-amber-800">LLM unavailable; showing local guidance.</p>
+              )}
+            </article>
+          ))}
+        </section>
+      )}
+
       {active && (
         <article className="mt-5 rounded-xl border border-indigo-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -184,6 +226,7 @@ export default function CommandCenter({ adminMode = false }) {
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-700">{effectSummary}</p>
+          {active.interpreter&&<p className="mt-1 text-xs text-slate-500">Plan source: {active.interpreter==='llm-structured'?'configured LLM':'deterministic offline fallback'}</p>}
 
           <h3 className="mt-4 font-medium text-slate-900">
             Server-resolved targets ({targets.length})
@@ -225,8 +268,10 @@ export default function CommandCenter({ adminMode = false }) {
               {confirm.isPending ? 'Confirming…' : 'Confirm and execute'}
             </button>
           ) : (
-            <p className="mt-4 rounded bg-green-50 p-3 text-sm text-green-900">
-              ✓ Read-only command queued automatically.
+            <p className={`mt-4 rounded p-3 text-sm ${active.status==='succeeded'?'bg-green-50 text-green-900':active.status==='failed'?'bg-red-50 text-red-900':'bg-blue-50 text-blue-900'}`}>
+              {active.status==='succeeded'?'✓ Read-only query completed using authorized portal data.':
+                active.status==='failed'?'The query failed; no successful result was produced.':
+                  'Read-only query queued; results will appear when execution finishes.'}
             </p>
           )}
 
@@ -272,9 +317,34 @@ export default function CommandCenter({ adminMode = false }) {
           ))}
 
           {progress.result_summary && (
-            <pre className="mt-3 whitespace-pre-wrap rounded bg-slate-50 p-3 text-xs font-mono text-slate-800">
-              {progress.result_summary}
-            </pre>
+            (() => {
+              const answerStep = progress.steps?.find((step) => step.result?.answer);
+              if (!answerStep) {
+                return (
+                  <pre className="mt-3 whitespace-pre-wrap rounded bg-slate-50 p-3 text-xs font-mono text-slate-800">
+                    {progress.result_summary}
+                  </pre>
+                );
+              }
+              return (
+                <div className="mt-3 rounded-lg bg-slate-50 p-4">
+                  <p className="whitespace-pre-wrap text-sm text-slate-900">{answerStep.result.answer}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {answerStep.result.answer_source === 'llm-grounded'
+                      ? 'LLM answer grounded in authorized database results'
+                      : 'Structured database answer; LLM unavailable or not configured'}
+                  </p>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-indigo-900">
+                      Show structured database result
+                    </summary>
+                    <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-white p-3 text-xs font-mono text-slate-800">
+                      {JSON.stringify(answerStep.result.data, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              );
+            })()
           )}
 
           {cancel.isError && (

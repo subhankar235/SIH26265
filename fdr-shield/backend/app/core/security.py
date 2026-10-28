@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib, secrets, bcrypt
 import hmac
+import logging
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from cryptography.fernet import Fernet, InvalidToken
@@ -8,6 +9,9 @@ import pyotp
 from jose import jwt, JWTError
 from app.core.config import get_settings
 from app.core.exceptions import AuthError
+from app.core.request_context import request_id_context
+
+logger = logging.getLogger(__name__)
 
 _argon = PasswordHasher()
 def _password_bytes(plain:str)->bytes:return hashlib.sha256(plain.encode('utf-8')).digest()
@@ -63,11 +67,34 @@ def decrypt_mfa_secret(value: str) -> str:
     except (InvalidToken, ValueError) as exc: raise ValueError('Stored MFA secret cannot be decrypted.') from exc
 
 def create_access_token(subject: str, role: str, expires_minutes: int | None = None, **claims) -> str:
-    s=get_settings(); token_type=claims.pop('token_type','access'); payload={'sub':subject,'role':role,'typ':token_type,'jti':secrets.token_urlsafe(16),'iat':datetime.now(timezone.utc),'exp':datetime.now(timezone.utc)+timedelta(minutes=expires_minutes or s.access_token_minutes),**claims}
+    s=get_settings()
+    token_type=claims.pop('token_type','access')
+    reserved={'sub','role','typ','jti','iat','exp'}
+    if reserved.intersection(claims):
+        raise ValueError('JWT standard claims cannot be overridden.')
+    lifetime=expires_minutes if expires_minutes is not None else s.access_token_minutes
+    if lifetime <= 0:
+        raise ValueError('JWT lifetime must be positive.')
+    now=datetime.now(timezone.utc)
+    payload={'sub':subject,'role':role,'typ':token_type,'jti':secrets.token_urlsafe(16),
+        'iat':now,'exp':now+timedelta(minutes=lifetime),**claims}
     return jwt.encode(payload,s.jwt_secret,algorithm=s.jwt_algorithm)
 def decode_token(token: str) -> dict:
     s=get_settings()
-    try: return jwt.decode(token,s.jwt_secret,algorithms=[s.jwt_algorithm])
-    except JWTError as exc: raise AuthError('Invalid or expired token') from exc
+    try:
+        payload=jwt.decode(token,s.jwt_secret,algorithms=[s.jwt_algorithm])
+        if (not isinstance(payload.get('sub'),str) or not payload['sub'] or
+                not isinstance(payload.get('role'),str) or not payload['role'] or
+                payload.get('typ') not in {'access','mfa'} or
+                not isinstance(payload.get('jti'),str) or not payload['jti'] or
+                isinstance(payload.get('iat'),bool) or not isinstance(payload.get('iat'),(int,float)) or
+                isinstance(payload.get('exp'),bool) or not isinstance(payload.get('exp'),(int,float))):
+            raise JWTError('Required JWT claims are missing or invalid')
+        return payload
+    except JWTError as exc:
+        category='expired' if type(exc).__name__=='ExpiredSignatureError' else 'invalid'
+        logger.info('jwt_validation_failed',extra={'failure_category':category,
+            'request_id':request_id_context.get()})
+        raise AuthError('Invalid or expired token') from exc
 def generate_totp_secret() -> str: return pyotp.random_base32()
 def verify_totp(secret: str, code: str) -> bool: return pyotp.TOTP(secret).verify(code, valid_window=1)

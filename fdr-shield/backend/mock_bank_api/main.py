@@ -6,9 +6,9 @@ except ModuleNotFoundError:
     from store import lookup
     from models import VerifyRequest
 
-app=FastAPI(title='FDR-Shield Demo Bank Gateway')
+app=FastAPI(title='NidhiTrack Demo Bank Gateway')
 @app.get('/banks')
-def banks(): return ['sbi','pnb','hdfc']
+def banks(): return ['sbi','pnb','hdfc','icici']
 def install(bank):
     @app.post(f'/{bank}/v1/fdr/verify')
     async def verify(body:VerifyRequest):
@@ -19,4 +19,4 @@ def install(bank):
     async def status(fdr_number:str):
         row=lookup(bank,fdr_number)
         return {'found':bool(row),'status':row['status'] if row else None}
-for name in ('sbi','pnb','hdfc'): install(name)
+for name in ('sbi','pnb','hdfc','icici'): install(name)

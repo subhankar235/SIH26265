@@ -40,6 +40,10 @@ def test_validation_flags_required_amount_date_and_duplicate_rules():
             assert not result.passed
             assert {'amount_positive','date_order','not_expired_on_submission','duplicate_instrument_reference'} <= rules
             assert 'holder' in result.required_fields_missing
+            assert 'bank_adapter_unavailable' in rules
+            invalid.declared_data={**invalid.declared_data,'bank_name':'State Bank of India'}
+            recognized=await validate_fdr(session,invalid,today=date.today())
+            assert 'bank_adapter_unavailable' not in {item.rule_id for item in recognized.discrepancies}
         await engine.dispose()
     asyncio.run(run())
 

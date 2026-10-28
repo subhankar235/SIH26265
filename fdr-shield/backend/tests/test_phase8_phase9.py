@@ -25,7 +25,7 @@ from app.core.database import Base
 from app.core.enums import AuthorizationState, ExecutionState, LifecycleState, Role
 from app.core.exceptions import InvalidStateTransition, NotFound, PermissionDenied
 from app.models import FDR, Institution, User
-from app.models.workflow import CommandExecution, OutboxEvent, WorkflowEvent, WorkflowInstance, WorkflowNodeExecution
+from app.models.workflow import CommandExecution, ExceptionItem, OutboxEvent, WorkflowEvent, WorkflowInstance, WorkflowNodeExecution
 from app.schemas.workflow import CommandIntentModel
 from app.services.command_service import cancel, confirm, execute, interpret
 from app.services.event_bus import get_event_bus
@@ -76,10 +76,10 @@ async def test_cross_institution_reference_rejected():
 async def test_model_returns_unknown_tool_rejected():
     """Test 2: If model or untrusted command specifies an unknown tool/intent -> rejected."""
     # Strict validation in CommandIntentModel rejects unknown intents
-    with pytest.raises(ValueError, match='Unsupported command intent'):
+    with pytest.raises(ValueError, match=r'Input should be|Unsupported command intent'):
         CommandIntentModel(intent='raw_sql_query', args={'query': 'SELECT * FROM users'}, confidence=0.9)
 
-    with pytest.raises(ValueError, match='Unsupported command intent'):
+    with pytest.raises(ValueError, match=r'Input should be|Unsupported command intent'):
         CommandIntentModel(intent='grant_admin_role', args={'user': 'attacker'}, confidence=0.9)
 
     engine, factory = await _setup_test_db()
@@ -121,6 +121,11 @@ async def test_bulk_without_confirm_rejected():
                                lifecycle_state=LifecycleState.CORRECTION_REQUIRED.value, execution_state=ExecutionState.WAITING_EVENT.value,
                                authorization_state=AuthorizationState.PENDING.value)
         session.add_all([wf1, wf2])
+        await session.flush()
+        session.add_all([
+            ExceptionItem(workflow_instance_id=wf1.id,reason_code='HIGH_DISCREPANCY',priority=2,status='open'),
+            ExceptionItem(workflow_instance_id=wf2.id,reason_code='OCR_INPUT_REQUIRED',priority=2,status='open'),
+        ])
         await session.commit()
 
         # Bulk escalation plan

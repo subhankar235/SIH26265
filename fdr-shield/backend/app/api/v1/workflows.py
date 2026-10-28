@@ -3,10 +3,11 @@ import asyncio
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session, SessionLocal
-from app.core.deps import Pagination, get_current_user, pagination, require_roles
+from app.core.deps import Pagination, get_current_user, is_current_access_session, pagination, require_roles
+from app.core.security import decode_token
 from app.core.enums import ExecutionState, Role
 from app.core.exceptions import InvalidStateTransition, NotFound
 from app.models.fdr import FDR
@@ -44,6 +45,69 @@ async def list_workflows(lifecycle_state: str | None=None, execution_state: str 
         'lifecycle_state':row.lifecycle_state,'execution_state':row.execution_state,
         'authorization_state':row.authorization_state,'current_node':row.current_node,
         'next_wake_at':row.next_wake_at,'updated_at':row.updated_at,'is_synthetic':is_synthetic} for row,is_synthetic in rows]
+
+
+@router.get('/control-room/summary')
+async def workflow_control_room_summary(session: AsyncSession=Depends(get_session),
+                                        user=Depends(OFFICIAL)):
+    state_rows = (await session.execute(
+        select(WorkflowInstance.execution_state, func.count(WorkflowInstance.id))
+        .group_by(WorkflowInstance.execution_state)
+    )).all()
+    state_counts = {state.value: 0 for state in ExecutionState}
+    state_counts.update({state: count for state, count in state_rows})
+    total_fdrs = await session.scalar(select(func.count(FDR.id))) or 0
+    fdrs_without_workflow = await session.scalar(
+        select(func.count(FDR.id)).where(
+            ~select(WorkflowInstance.id)
+            .where(WorkflowInstance.fdr_id == FDR.id)
+            .exists()
+        )
+    ) or 0
+    return {
+        'total_workflows': sum(state_counts.values()),
+        'total_fdrs': total_fdrs,
+        'fdrs_without_workflow': fdrs_without_workflow,
+        'execution_state_counts': state_counts,
+    }
+
+
+@router.get('/control-room')
+async def workflow_control_room_page(
+        before_id: int | None=Query(default=None, gt=0),
+        page_size: int=Query(default=100, ge=1, le=200),
+        execution_state: str | None=None,
+        session: AsyncSession=Depends(get_session), user=Depends(OFFICIAL)):
+    query = select(WorkflowInstance, FDR.is_synthetic).join(
+        FDR, FDR.id == WorkflowInstance.fdr_id
+    )
+    if execution_state:
+        query = query.where(WorkflowInstance.execution_state == execution_state)
+    if before_id is not None:
+        query = query.where(WorkflowInstance.id < before_id)
+    query = query.order_by(WorkflowInstance.id.desc())
+    rows = list((await session.execute(query.limit(page_size + 1))).all())
+    has_more = len(rows) > page_size
+    rows = rows[:page_size]
+    items = [{
+        'id': row.id,
+        'fdr_id': row.fdr_id,
+        'institution_id': row.institution_id,
+        'workflow_version': row.workflow_version,
+        'execution_version': row.execution_version,
+        'lifecycle_state': row.lifecycle_state,
+        'execution_state': row.execution_state,
+        'authorization_state': row.authorization_state,
+        'current_node': row.current_node,
+        'next_wake_at': row.next_wake_at,
+        'updated_at': row.updated_at,
+        'is_synthetic': is_synthetic,
+    } for row, is_synthetic in rows]
+    return {
+        'items': items,
+        'has_more': has_more,
+        'next_before_id': items[-1]['id'] if has_more and items else None,
+    }
 
 
 @router.get('/recommendations')
@@ -212,7 +276,7 @@ async def workflow_events(workflow_id: int, after: int = 0, page: Pagination = D
              'received_at': row.received_at, 'processed_at': row.processed_at} for row in rows]
 
 
-@router.get('/{workflow_id}/stream')
+@router.get('/{workflow_id:int}/stream')
 async def stream_workflow(workflow_id: int, request: Request, after: int = 0,
                           session: AsyncSession = Depends(get_session), user = Depends(get_current_user)):
     instance = await _scoped_workflow(session, workflow_id, user)
@@ -250,11 +314,14 @@ async def stream_workflow(workflow_id: int, request: Request, after: int = 0,
                 return
 
             # Live user and authorization revocation check
+            try: live_claims=decode_token(request.cookies.get('access_token',''))
+            except Exception: live_claims={}
             async with SessionLocal() as check_session:
                 live_user = await check_session.get(User, user.id)
                 state = await check_session.get(WorkflowInstance, workflow_id)
+                session_valid=bool(live_user and await is_current_access_session(check_session,live_user,live_claims))
 
-            if not live_user or not live_user.is_active or live_user.status != 'active' or not state:
+            if not live_user or not state or not session_valid:
                 yield 'event: stream.revoked\ndata: {}\n\n'
                 return
 
@@ -322,8 +389,12 @@ async def stream_exceptions(request: Request, after: int = 0,
 
             async with SessionLocal() as check_session:
                 live_user = await check_session.get(User, user.id)
+                try: live_claims=decode_token(request.cookies.get('access_token',''))
+                except Exception: live_claims={}
+                authorized=bool(live_user and await is_current_access_session(check_session,live_user,live_claims)
+                    and live_user.role in {Role.AICTE_OFFICIAL.value,Role.ADMIN.value})
 
-            if not live_user or not live_user.is_active or live_user.status != 'active' or live_user.role not in {'aicte_official', 'admin'}:
+            if not authorized:
                 yield 'event: stream.revoked\ndata: {}\n\n'
                 return
 

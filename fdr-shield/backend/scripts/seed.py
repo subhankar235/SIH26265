@@ -31,9 +31,12 @@ async def seed():
         'sbi': [
             {'fdr_number':'SBI100001','holder_name':'ABC Institute of Technology','amount':1000000,'maturity_date':'2027-03-31','status':'ACTIVE'},
             {'fdr_number':'SBI100099','holder_name':'ABC Institute of Technology','amount':850000,'maturity_date':'2027-03-31','status':'ACTIVE'},
+            {'fdr_number':'SBIFD20240123456','holder_name':'MR. VIKRAM KUMAR SINGH / MRS. ANJALI SINGH',
+                'amount':1000000,'issue_date':'2024-02-10','maturity_date':'2027-02-10','status':'ACTIVE'},
         ],
         'pnb': [{'fdr_number':'PNB200001','holder_name':'XYZ College of Engineering','amount':500000,'maturity_date':'2026-12-15','status':'ACTIVE'}],
         'hdfc': [{'fdr_number':'HDFC300001','holder_name':'PQR Polytechnic','amount':750000,'maturity_date':'2026-11-20','status':'ACTIVE'}],
+        'icici': [],
     }
     async with SessionLocal() as session:
         institutions = []
@@ -98,6 +101,12 @@ async def seed():
         'amount':49000,'issue_date':'2017-04-29','maturity_date':'2018-04-30','status':'ACTIVE'})
     bank_rows['hdfc'].append({'fdr_number':'50300277148239','holder_name':'MS RAJWINDER KAUR',
         'amount':450000,'issue_date':'2022-09-01','maturity_date':'2023-09-03','status':'ACTIVE'})
+    bank_rows['hdfc'].append({'fdr_number':'HDFCFD2406147890',
+        'holder_name':'MR. SUBHANKAR NATH / MRS. RITU NATH','amount':500000,
+        'issue_date':'2024-06-14','maturity_date':'2027-06-14','status':'ACTIVE'})
+    bank_rows['icici'].append({'fdr_number':'ICIFD2404056789',
+        'holder_name':'MR. ARJUN VERMA / MRS. POOJA VERMA','amount':300000,
+        'issue_date':'2024-04-05','maturity_date':'2026-04-05','status':'ACTIVE'})
     bank_rows['pnb'].append({'fdr_number':'1558000101602751','holder_name':'KARAMBIR',
         'amount':800000,'issue_date':'2024-09-14','maturity_date':'2026-09-14','status':'ACTIVE'})
     bank_rows['sbi'].append({'fdr_number':'SBI-DEMO-MISMATCH','holder_name':'ABC Institute of Technology',
@@ -110,7 +119,7 @@ async def seed():
         if not source.is_file(): raise RuntimeError(f'Missing genuine demo scan: {source}')
         (scan_dir / f'sample-{bank}.png').write_bytes(source.read_bytes())
 
-    print('FDR-Shield demo credentials (password for all: DemoPass123!):')
+    print('NidhiTrack demo credentials (password for all: DemoPass123!):')
     print('  officer@example.test and chief@example.test (AICTE Official), admin@example.test')
     for i in range(1, 6): print(f'  institution{i}@example.test')
 

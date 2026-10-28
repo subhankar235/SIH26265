@@ -1,4 +1,4 @@
-from typing import Protocol, TypedDict
+from typing import NotRequired, Protocol, TypedDict
 
 
 class FdrFields(TypedDict):
@@ -9,6 +9,8 @@ class FdrFields(TypedDict):
     amount: str | int | float | None
     issue_date: str | None
     maturity_date: str | None
+    document_format: NotRequired[str | None]
+    format_reason: NotRequired[str | None]
 
 
 class FdrExtractor(Protocol):

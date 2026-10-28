@@ -1,0 +1,1 @@
+`archive-wall.jpg` is a public-domain photograph of the Federal Records Center in Alexandria, Virginia, made by the U.S. National Archives and Records Service in 1952. Source: https://commons.wikimedia.org/wiki/File:Photograph_of_Steel_Shelving_and_Records_at_Federal_Records_Center,_Alexandria,_Virginia,_Front_View_(35388460636).jpg

@@ -26,12 +26,12 @@ async def stage_for(days_left: int) -> AlertStage | None:
 async def dispatch_alert(session: AsyncSession, fdr: FDR, stage: AlertStage) -> None:
     # Persist notification intent and delivery work atomically; dispatcher owns provider calls.
     stage=getattr(stage,'value',stage)
-    if await session.scalar(select(Notification.id).where(Notification.fdr_id==fdr.id,Notification.stage==stage)):return
     inst=await session.get(Institution,fdr.institution_id);subject,body=await render_template(AlertStage(stage),fdr)
     channels=[('email',inst.contact_email),('whatsapp_mock',inst.contact_phone)]
     if inst.telegram_chat_id:channels.append(('telegram',inst.telegram_chat_id))
     scheduled_at=datetime.now(timezone.utc)
     for channel,to in channels:
+        if await session.scalar(select(Notification.id).where(Notification.fdr_id==fdr.id,Notification.stage==stage,Notification.channel==channel)):continue
         notification=Notification(fdr_id=fdr.id,stage=stage,channel=channel,recipient=to,
             status='queued',sent_at=None)
         session.add(notification);await session.flush()

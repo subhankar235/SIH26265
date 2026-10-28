@@ -2,7 +2,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = '0014_disable_public_email_verification'
+revision = '0014_disable_email_verify'
 down_revision = '0013_super_admin_setup_phone'
 branch_labels = None
 depends_on = None

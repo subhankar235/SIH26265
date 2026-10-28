@@ -4,9 +4,12 @@ from fastapi import APIRouter, Depends, Query, Header
 from app.core.database import get_session
 from app.core.deps import get_current_user, require_roles
 from app.core.deps import pagination, Pagination
+from app.core.config import get_settings
 from app.services import verification_service
 from app.services.fdr_service import get_fdr
 from app.services.workflow_state_service import start_new_execution
+from app.models.workflow import WorkflowInstance
+from sqlalchemy import select
 
 router = APIRouter()
 
@@ -17,8 +20,23 @@ async def run_verification(fdr_id: int, reason: str = Query('AICTE Official requ
                            session=Depends(get_session), user=Depends(require_roles('aicte_official'))):
     # Reprocessing starts a new durable execution version and preserves prior node history.
     fdr = await get_fdr(session, fdr_id)
+    if get_settings().celery_task_always_eager:
+        latest = await session.scalar(select(WorkflowInstance).where(
+            WorkflowInstance.fdr_id == fdr_id
+        ).order_by(WorkflowInstance.execution_version.desc()).limit(1))
+        if latest and latest.execution_state in {'running', 'retrying'}:
+            from app.services.local_execution_service import run_inline_workflow_if_enabled
+            await run_inline_workflow_if_enabled(session, fdr_id, resume_active=True)
+            await session.refresh(latest)
+            return {'queued':False,'workflow_id':latest.id,
+                    'execution_version':latest.execution_version,
+                    'execution_state':latest.execution_state,'resumed':True}
     instance = await start_new_execution(session, fdr, user.id, reason, idempotency_key)
-    return {'queued':True,'workflow_id':instance.id,'execution_version':instance.execution_version,
+    from app.services.local_execution_service import run_inline_workflow_if_enabled
+    ran_inline = await run_inline_workflow_if_enabled(session, fdr_id)
+    if ran_inline:
+        await session.refresh(instance)
+    return {'queued':not ran_inline,'workflow_id':instance.id,'execution_version':instance.execution_version,
             'execution_state':instance.execution_state}
 
 

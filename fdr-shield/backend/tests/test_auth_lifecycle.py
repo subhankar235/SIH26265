@@ -1,15 +1,19 @@
 import asyncio
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+import time
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from jose import jwt
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_session
+from app.core.deps import is_current_access_session
+from app.core.config import get_settings
 from app.core.enums import AccountStatus, Role
 from app.core.exceptions import AccountStatusError, AuthError, PermissionDenied
 from app.core.security import (create_access_token, decode_token, decrypt_mfa_secret,
@@ -20,6 +24,11 @@ from app.models.auth_records import OneTimeToken, RefreshToken
 from app.services import auth_service
 from app.schemas.auth import InstitutionRegistrationRequest, OfficialRegistrationRequest
 from app.services import user_admin_service
+
+
+def portal_login(client, body, endpoint='/api/v1/auth/login'):
+    csrf=client.get('/api/v1/auth/csrf').json()['csrf_token']
+    return client.post(endpoint,json=body,headers={'X-CSRF-Token':csrf})
 
 
 def test_argon2id_password_hash_and_legacy_upgrade_path():
@@ -138,45 +147,66 @@ def test_portal_login_cookie_session_refresh_reuse_and_csrf():
         app = create_app()
         app.dependency_overrides[get_session] = session_override
         client = TestClient(app)
-        role_tamper = client.post('/api/v1/auth/login', json={
-            'email': 'college@example.test', 'password': 'College-Safe-Password-2026', 'role':'admin'})
-        wrong_password = client.post('/api/v1/auth/login', json={
-            'email': 'college@example.test', 'password': 'wrong-password'})
+        role_tamper = portal_login(client,{
+            'email': 'college@example.test', 'password': 'College-Safe-Password-2026',
+            'portal':'institution','role':'admin'})
+        wrong_password = portal_login(client,{
+            'email': 'college@example.test', 'password': 'wrong-password','portal':'institution'})
         assert role_tamper.status_code == 200
         assert role_tamper.json()['user']['role'] == Role.INSTITUTION.value
         assert wrong_password.status_code == 401
         assert wrong_password.json()['error'] == {
             'code': 'INVALID_CREDENTIALS', 'message': auth_service.GENERIC_INVALID}
 
-        pending_wrong_password = client.post('/api/v1/auth/login', json={
-            'email': 'pending-official@example.test', 'password': 'not-the-password'})
-        pending_correct_password = client.post('/api/v1/auth/login', json={
-            'email': 'pending-official@example.test', 'password': 'Pending-Official-Password-2026'})
+        pending_wrong_password = portal_login(client,{
+            'email': 'pending-official@example.test', 'password': 'not-the-password','portal':'official'})
+        pending_correct_password = portal_login(client,{
+            'email': 'pending-official@example.test', 'password': 'Pending-Official-Password-2026','portal':'official'})
         assert pending_wrong_password.status_code == 401
         assert pending_correct_password.status_code == 403
         assert pending_correct_password.json()['error']['code'] == 'ACCOUNT_STATUS'
         assert 'awaiting administrator approval' in pending_correct_password.json()['error']['message']
 
-        response = client.post('/api/v1/auth/login', json={
-            'email': 'college@example.test', 'password': 'College-Safe-Password-2026'})
+        response = portal_login(client,{
+            'email': 'college@example.test', 'password': 'College-Safe-Password-2026','portal':'institution'})
         assert response.status_code == 200
         assert 'access_token' not in response.json()
         assert response.json()['user']['role'] == 'institution'
-        assert 'httponly' in response.headers.get('set-cookie', '').lower()
+        cookies=response.headers.get_list('set-cookie')
+        access_cookie=next(value.lower() for value in cookies if value.lower().startswith('access_token='))
+        refresh_cookie=next(value.lower() for value in cookies if value.lower().startswith('refresh_token='))
+        csrf_cookie=next(value.lower() for value in cookies if value.lower().startswith('csrf_token='))
+        assert 'httponly' in access_cookie and 'path=/' in access_cookie and 'max-age=43200' in access_cookie
+        assert 'httponly' in refresh_cookie and 'path=/api/v1/auth' in refresh_cookie and 'max-age=2592000' in refresh_cookie
+        assert 'httponly' not in csrf_cookie and 'samesite=lax' in csrf_cookie
+        assert response.json()['csrf_token']
         assert client.get('/api/v1/auth/me').json()['email'] == 'college@example.test'
         assert client.get('/api/v1/dashboard/institution').status_code == 200
         assert client.get('/api/v1/dashboard/bureau').status_code == 403
 
+        # Expired access cookies must be recoverable via the valid, DB-backed refresh session.
+        current_claims=decode_token(client.cookies.get('access_token'))
+        current_claims['exp']=int(time.time())-10
+        expired_access=jwt.encode(current_claims,get_settings().jwt_secret,algorithm=get_settings().jwt_algorithm)
+        client.cookies.set('access_token',expired_access,domain='testserver.local',path='/')
+        assert client.get('/api/v1/auth/me').status_code==401
+        csrf=client.cookies.get('csrf_token')
+        refreshed=client.post('/api/v1/auth/refresh',headers={'X-CSRF-Token':csrf})
+        assert refreshed.status_code==200
+        assert refreshed.json()['user']['email']=='college@example.test'
+        assert refreshed.json()['csrf_token']
+        assert client.get('/api/v1/auth/me').json()['email']=='college@example.test'
+
         official_client = TestClient(app)
-        official_response = official_client.post('/api/v1/auth/login', json={
-            'email':'official@example.test','password':'Official-Safe-Password-2026'})
+        official_response = portal_login(official_client,{
+            'email':'official@example.test','password':'Official-Safe-Password-2026','portal':'official'})
         assert official_response.status_code == 200
         assert official_response.json()['user']['role'] == Role.AICTE_OFFICIAL.value
         assert official_client.get('/api/v1/admin/users').status_code == 403
 
         admin_client = TestClient(app)
-        admin_response = admin_client.post('/api/v1/auth/login', json={
-            'email':'admin@example.test','password':'Super-Admin-Password-2026'})
+        admin_response = portal_login(admin_client,{
+            'email':'admin@example.test','password':'Super-Admin-Password-2026','portal':'admin'})
         assert admin_response.status_code == 200
         assert admin_response.json()['user']['role'] == Role.SUPER_ADMIN.value
         assert admin_client.get('/api/v1/admin/users').status_code == 200
@@ -187,6 +217,107 @@ def test_portal_login_cookie_session_refresh_reuse_and_csrf():
         assert client.get('/api/v1/auth/me').status_code == 401
         await engine.dispose()
 
+    asyncio.run(run())
+
+
+def test_three_portal_login_matrix_rejects_cross_portal_credentials_and_stale_sessions():
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)
+        accounts=[
+            ('college@example.test','College-Portal-Password-2026',Role.INSTITUTION.value),
+            ('official@example.test','Official-Portal-Password-2026',Role.AICTE_OFFICIAL.value),
+            ('admin@example.test','Super-Admin-Portal-Password-2026',Role.ADMIN.value),
+        ]
+        portal_roles={'institution':Role.INSTITUTION.value,'official':Role.AICTE_OFFICIAL.value,
+            'admin':Role.ADMIN.value}
+        async with factory() as session:
+            institution=Institution(aicte_id='AICTE-PORTAL-MATRIX',name='Matrix College',state='Delhi',
+                head_name='Principal',contact_email='college@example.test',contact_phone='9000000050',status='active')
+            session.add(institution);await session.flush()
+            for email,password,role in accounts:
+                session.add(User(email=email,full_name=role,password_hash=hash_password(password),role=role,
+                    institution_id=institution.id if role==Role.INSTITUTION.value else None,
+                    status=AccountStatus.ACTIVE.value,is_active=True))
+            pending_institution=Institution(aicte_id='AICTE-PORTAL-PENDING',name='Pending College',state='Delhi',
+                head_name='Principal',contact_email='pending-college@example.test',contact_phone='9000000051',
+                status='pending_approval')
+            session.add(pending_institution);await session.flush()
+            session.add(User(email='pending-college@example.test',full_name='Pending College',
+                password_hash=hash_password('Pending-College-Password-2026'),role=Role.INSTITUTION.value,
+                institution_id=pending_institution.id,status=AccountStatus.PENDING_APPROVAL.value,is_active=False))
+            await session.commit()
+
+        async def session_override():
+            async with factory() as session:
+                try:
+                    yield session
+                    await session.commit()
+                except Exception:
+                    await session.rollback();raise
+
+        app=create_app();app.dependency_overrides[get_session]=session_override
+        no_portal_client=TestClient(app)
+        no_portal=portal_login(no_portal_client,{'email':'college@example.test',
+            'password':'College-Portal-Password-2026'})
+        assert no_portal.status_code==422
+        assert no_portal_client.get('/api/v1/auth/me').status_code==401
+
+        for requested_portal in ('institution','official','admin'):
+            for email,password,actual_role in accounts:
+                client=TestClient(app)
+                response=portal_login(client,{'email':email,'password':password,'portal':requested_portal})
+                if portal_roles[requested_portal]==actual_role:
+                    assert response.status_code==200,(requested_portal,actual_role,response.text)
+                    assert response.json()['user']['role']==actual_role
+                    assert client.get('/api/v1/auth/me').json()['role']==actual_role
+                    command_access=client.get('/api/v1/commands').status_code
+                    assert command_access==200
+                    # A valid refresh preserves the account's stored role and cannot elevate it.
+                    csrf=client.cookies.get('csrf_token')
+                    refreshed=client.post('/api/v1/auth/refresh',headers={'X-CSRF-Token':csrf})
+                    assert refreshed.status_code==200
+                    if actual_role==Role.INSTITUTION.value:
+                        assert client.get('/api/v1/admin/users').status_code==403
+                        assert client.get('/api/v1/dashboard/bureau').status_code==403
+                    elif actual_role==Role.AICTE_OFFICIAL.value:
+                        assert client.get('/api/v1/admin/users').status_code==403
+                        assert client.get('/api/v1/dashboard/institution').status_code==403
+                    else:
+                        assert client.get('/api/v1/admin/users').status_code==200
+                        assert client.get('/api/v1/dashboard/institution').status_code==403
+                else:
+                    assert response.status_code==401,(requested_portal,actual_role,response.text)
+                    assert any(cookie.lower().startswith('access_token=') and 'max-age=0' in cookie.lower()
+                        for cookie in response.headers.get_list('set-cookie'))
+                    assert client.get('/api/v1/auth/me').status_code==401
+
+        # The hidden compatibility URL is bound to its path, not a role submitted by a client.
+        legacy_client=TestClient(app)
+        legacy=portal_login(legacy_client,{'email':'admin@example.test',
+            'password':'Super-Admin-Portal-Password-2026'},endpoint='/api/v1/auth/login/institution')
+        assert legacy.status_code==401
+        assert legacy_client.get('/api/v1/auth/me').status_code==401
+
+        pending_client=TestClient(app)
+        pending=portal_login(pending_client,{'email':'pending-college@example.test',
+            'password':'Pending-College-Password-2026','portal':'institution'})
+        assert pending.status_code==403
+        assert pending.json()['error']['code']=='ACCOUNT_STATUS'
+        assert pending_client.get('/api/v1/auth/me').status_code==401
+
+        # Switching portals first revokes the previous shared SSO family; a rejected
+        # cross-portal attempt cannot leave the previous authenticated user in the browser.
+        switching_client=TestClient(app)
+        assert portal_login(switching_client,{'email':'admin@example.test',
+            'password':'Super-Admin-Portal-Password-2026','portal':'admin'}).status_code==200
+        rejected=portal_login(switching_client,{'email':'college@example.test',
+            'password':'College-Portal-Password-2026','portal':'admin'})
+        assert rejected.status_code==401
+        assert switching_client.get('/api/v1/auth/me').status_code==401
+        await engine.dispose()
     asyncio.run(run())
 
 
@@ -217,6 +348,36 @@ def test_refresh_token_rotation_replay_revokes_family_and_access_version():
                 await session.scalar(select(RefreshToken.family_id).where(RefreshToken.token_hash == auth_service.hash_token(first['refresh_token'])))
             )))).all())
             assert all(token.revoked_at is not None for token in tokens)
+        await engine.dispose()
+    asyncio.run(run())
+
+
+def test_live_stream_session_validation_observes_role_version_and_refresh_revocation():
+    async def run():
+        engine=create_async_engine('sqlite+aiosqlite:///:memory:',poolclass=StaticPool,
+            connect_args={'check_same_thread':False})
+        factory=async_sessionmaker(engine,expire_on_commit=False)
+        async with engine.begin() as conn:await conn.run_sync(Base.metadata.create_all)
+        async with factory() as session:
+            institution=Institution(aicte_id='AICTE-STREAM-SESSION',name='Stream College',state='Delhi',
+                head_name='Principal',contact_email='stream@example.test',contact_phone='9000000052',status='active')
+            session.add(institution);await session.flush()
+            user=User(email='stream@example.test',full_name='Stream User',password_hash='x',
+                role=Role.INSTITUTION.value,institution_id=institution.id,status='active',is_active=True)
+            session.add(user);await session.flush()
+            family='stream-family-0001';now=auth_service.utcnow()
+            session.add(RefreshToken(user_id=user.id,token_hash='a'*64,family_id=family,
+                issued_at=now,expires_at=now+timedelta(days=1)))
+            token=create_access_token(str(user.id),user.role,institution_id=institution.id,
+                ver=user.session_version,sid=family)
+            claims=decode_token(token)
+            assert await is_current_access_session(session,user,claims)
+            user.session_version+=1
+            assert not await is_current_access_session(session,user,claims)
+            user.session_version-=1
+            await session.execute(update(RefreshToken).where(RefreshToken.family_id==family)
+                .values(revoked_at=auth_service.utcnow()))
+            assert not await is_current_access_session(session,user,claims)
         await engine.dispose()
     asyncio.run(run())
 

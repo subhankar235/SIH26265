@@ -80,8 +80,9 @@ class ExceptionDecisionRequest(BaseModel):
 
 
 class CommandInterpretRequest(BaseModel):
-    text: str = Field(min_length=3,max_length=2000)
+    text: str = Field(min_length=1,max_length=2000)
     idempotency_key: str = Field(min_length=8,max_length=255)
+    conversation_id: str | None = Field(default=None,min_length=8,max_length=64,pattern=r'^[A-Za-z0-9_-]+$')
 
 
 class CommandConfirmRequest(BaseModel):
@@ -92,10 +93,18 @@ class CommandCancelRequest(BaseModel):
     reason: str = Field(min_length=4,max_length=1000)
 
 
+class StrictCommandArgs(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+
 class CommandIntentModel(BaseModel):
     """Strict allowlisted intent contract used after deterministic/LLM parsing."""
     model_config = ConfigDict(extra='forbid')
-    intent: str
+    intent: Literal['find_maturing','recheck_document','list_by_state','prepare_reminders',
+        'list_overdue','pause_case','resume_case','retry_node','list_awaiting_my_approval',
+        'list_awaiting_approval','explain_blocked','explain_case_status',
+        'summarize_failed_notifications','escalate_cases','get_fdr_details','get_task_status','count_fdrs',
+        'list_recent_fdrs','analyze_maturing_discrepancies','list_unresolved_discrepancies']
     args: dict[str, Any] = Field(default_factory=dict)
     confidence: float = Field(default=1.0, ge=0, le=1)
 
@@ -106,7 +115,9 @@ class CommandIntentModel(BaseModel):
             'FIND_MATURING', 'RECHECK_DOCUMENT', 'LIST_BY_STATE', 'PREPARE_REMINDERS',
             'LIST_OVERDUE', 'PAUSE_CASE', 'RESUME_CASE', 'RETRY_NODE',
             'LIST_AWAITING_MY_APPROVAL', 'LIST_AWAITING_APPROVAL', 'EXPLAIN_BLOCKED',
-            'EXPLAIN_CASE_STATUS', 'SUMMARIZE_FAILED_NOTIFICATIONS', 'ESCALATE_CASES'
+            'EXPLAIN_CASE_STATUS', 'SUMMARIZE_FAILED_NOTIFICATIONS', 'ESCALATE_CASES',
+            'GET_FDR_DETAILS', 'GET_TASK_STATUS','COUNT_FDRS', 'LIST_RECENT_FDRS',
+            'ANALYZE_MATURING_DISCREPANCIES','LIST_UNRESOLVED_DISCREPANCIES'
         }
         if normalized not in allowed_intents:
             raise ValueError(f'Unsupported command intent: {self.intent}')
@@ -120,6 +131,12 @@ class CommandIntentModel(BaseModel):
             'list_awaiting_approval': {},
             'explain_blocked': {'fdr_ref': str},
             'explain_case_status': {'fdr_ref': str},
+            'get_fdr_details': {'fdr_ref': str},
+            'get_task_status': {'command_id':int},
+            'count_fdrs': {},
+            'list_recent_fdrs': {'limit': int},
+            'analyze_maturing_discrepancies': {'days':int,'limit':int},
+            'list_unresolved_discrepancies': {'limit':int},
             'summarize_failed_notifications': {},
             'pause_case': {'fdr_ref': str},
             'resume_case': {'fdr_ref': str},
@@ -132,7 +149,9 @@ class CommandIntentModel(BaseModel):
         for key, kind in expected.items():
             if key not in self.args:
                 if key == 'days':
-                    self.args[key] = 30
+                    self.args[key] = 90 if self.intent=='analyze_maturing_discrepancies' else 30
+                elif key=='limit' and self.intent in {'analyze_maturing_discrepancies','list_unresolved_discrepancies'}:
+                    self.args[key]=100
                 elif key == 'state':
                     self.args[key] = 'submitted'
                 else:
@@ -150,6 +169,13 @@ class CommandIntentModel(BaseModel):
 
         if self.intent == 'find_maturing' and not 1 <= self.args.get('days', 30) <= 365:
             raise ValueError('days must be between 1 and 365.')
+        if self.intent == 'list_recent_fdrs' and not 1 <= self.args.get('limit', 5) <= 50:
+            raise ValueError('limit must be between 1 and 50.')
+        if self.intent=='analyze_maturing_discrepancies':
+            if not 1<=self.args.get('days',90)<=365:raise ValueError('days must be between 1 and 365.')
+            if not 1<=self.args.get('limit',100)<=200:raise ValueError('limit must be between 1 and 200.')
+        if self.intent=='list_unresolved_discrepancies' and not 1<=self.args.get('limit',100)<=200:
+            raise ValueError('limit must be between 1 and 200.')
         if self.intent == 'list_by_state':
             state_val = self.args.get('state')
             valid_states = {
