@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, BadgeCheck, Building2, ChartNoAxesCombined, Check, ClipboardCheck, FileCheck2, FolderOpen, Github, Linkedin, LockKeyhole, Mail, Printer, ScanSearch } from 'lucide-react';
+import { ArrowRight, BadgeCheck, Building2, ChartNoAxesCombined, Check, ClipboardCheck, Download, FileCheck2, FolderOpen, Github, Linkedin, LockKeyhole, Mail, Printer, ScanSearch } from 'lucide-react';
 import BrandHeader from '../components/layout/BrandHeader';
 import BrandWordmark from '../components/layout/BrandWordmark';
 
@@ -73,6 +73,7 @@ export default function PublicLandingPage() {
         <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-[#111827] sm:text-lg sm:leading-8">Move each security deposit from receipt to verification, review, and renewal with a clear, auditable record at every step.</p>
         <div className="mt-7 flex flex-wrap justify-center gap-3">
           <Link to="/login" className="inline-flex min-h-12 items-center gap-2 rounded-md bg-gradient-to-r from-[#3182F6] to-[#20B99D] px-6 py-3 font-medium text-white shadow-[0_4px_12px_rgba(49,130,246,.24)] transition-transform hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3182F6]">Choose your workspace <ArrowRight size={17}/></Link>
+          <a href="https://github.com/subhankar235/SIH26265/releases" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-12 items-center gap-2 rounded-md border border-[#BFCBD7] bg-white/35 px-6 py-3 font-medium text-[#111827] transition-colors hover:border-[#3182f6] hover:bg-white/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3182F6]"><Download size={17}/> Download App APK</a>
           <a href="#features" className="inline-flex min-h-12 items-center rounded-md border border-[#BFCBD7] bg-white/35 px-6 py-3 font-medium text-[#111827] transition-colors hover:border-[#3182f6] hover:bg-white/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3182F6]">Explore the features</a>
         </div>
         <div className="mt-5 flex flex-wrap justify-center gap-x-5 gap-y-3 text-sm text-[#111827]">
