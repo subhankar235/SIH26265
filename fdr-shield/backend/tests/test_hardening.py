@@ -13,10 +13,10 @@ from pathlib import Path
 
 
 @pytest.mark.parametrize('role,allowed', [
-    ('institution', False), ('scrutiny_officer', False), ('bureau_chief', True), ('admin', True),
+    ('institution', False), ('aicte_official', True), ('admin', True),
 ])
-def test_chief_only_role_guard(role, allowed):
-    check = require_roles('bureau_chief', 'admin')
+def test_official_and_admin_role_guard(role, allowed):
+    check = require_roles('aicte_official', 'admin')
     async def run():
         if allowed:
             assert (await check(user=SimpleNamespace(role=role))).role == role
@@ -44,6 +44,10 @@ def test_trust_badge_outcomes(bank, discrepancies, expected):
     assert asyncio.run(compute_badge(bank, discrepancies)) is expected
 
 
+def test_all_null_ocr_without_bank_stays_yellow():
+    assert asyncio.run(compute_badge(None, [])) is TrustBadge.SELF_DECLARED
+
+
 @pytest.mark.parametrize('page,size,skip,limit', [
     (1, 20, 0, 20), (3, 10, 20, 10), (0, 0, 0, 1), (99, 1000, 9800, 100),
 ])
@@ -69,3 +73,72 @@ def test_local_storage_rejects_tampered_signed_url(tmp_path, monkeypatch):
                              s3_endpoint='', s3_access_key='', s3_secret_key='', s3_bucket='unused')
     monkeypatch.setattr(storage_client, 'get_settings', lambda: config)
     with pytest.raises(ValueError): storage_client.read_local_token('invalid.token.signature')
+
+
+def test_s3_presigned_url_uses_browser_reachable_endpoint(monkeypatch):
+    config = SimpleNamespace(storage_backend='minio', s3_endpoint='http://minio:9000',
+        s3_public_endpoint='http://localhost:9000', s3_access_key='access',
+        s3_secret_key='secret', s3_region='us-east-1', s3_bucket='fdr-documents')
+    endpoints = []
+
+    class FakeS3:
+        def generate_presigned_url(self, operation, Params, ExpiresIn):
+            assert operation == 'get_object'
+            assert Params == {'Bucket': 'fdr-documents', 'Key': '1/fdr_scan/receipt.png'}
+            assert ExpiresIn == 300
+            return f'{endpoints[-1]}/fdr-documents/1/fdr_scan/receipt.png?signature=test'
+
+    def fake_boto_client(service, **kwargs):
+        assert service == 's3'
+        endpoints.append(kwargs['endpoint_url'])
+        return FakeS3()
+
+    monkeypatch.setattr(storage_client, 'get_settings', lambda: config)
+    monkeypatch.setattr(storage_client.boto3, 'client', fake_boto_client)
+    url = storage_client.presign('1/fdr_scan/receipt.png')
+    assert endpoints == ['http://localhost:9000']
+    assert url.startswith('http://localhost:9000/')
+
+
+def test_s3_client_uses_region_and_path_style_for_neon_storage(monkeypatch):
+    config = SimpleNamespace(storage_backend='s3',
+        s3_endpoint='https://branch.storage.aws.neon.tech', s3_public_endpoint='',
+        s3_access_key='access', s3_secret_key='secret', s3_region='us-east-2',
+        s3_bucket='fdr-documents')
+    captured = {}
+
+    def fake_boto_client(service, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(storage_client, 'get_settings', lambda: config)
+    monkeypatch.setattr(storage_client.boto3, 'client', fake_boto_client)
+    storage_client._client()
+
+    assert captured['endpoint_url'] == config.s3_endpoint
+    assert captured['region_name'] == 'us-east-2'
+    assert captured['config'].s3['addressing_style'] == 'path'
+    assert captured['aws_access_key_id'] == 'access'
+    assert captured['aws_secret_access_key'] == 'secret'
+
+
+def test_dashboard_redis_cache_uses_bounded_timeouts_and_closes_client(monkeypatch):
+    import redis
+    from app.services import dashboard_service
+
+    seen = {}
+
+    class FakeRedis:
+        def get(self, key): return None
+        def close(self): seen['closed'] = True
+
+    def fake_from_url(cls, url, **kwargs):
+        seen.update(kwargs)
+        return FakeRedis()
+
+    monkeypatch.setattr(redis.Redis, 'from_url', classmethod(fake_from_url))
+    assert asyncio.run(dashboard_service._cache_get('dashboard:test')) is None
+    assert seen['socket_connect_timeout'] <= 0.25
+    assert seen['socket_timeout'] <= 0.25
+    assert seen['retry_on_timeout'] is False
+    assert seen['closed'] is True

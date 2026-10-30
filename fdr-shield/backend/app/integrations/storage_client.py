@@ -6,12 +6,21 @@ import hashlib
 import hmac
 from pathlib import Path
 from datetime import datetime, timezone
+from botocore.config import Config
 from app.core.config import get_settings
 
 logger=logging.getLogger(__name__)
 
-def _client():
- s=get_settings();return boto3.client('s3',endpoint_url=s.s3_endpoint,aws_access_key_id=s.s3_access_key,aws_secret_access_key=s.s3_secret_key)
+def _client(endpoint_url=None):
+ s=get_settings()
+ return boto3.client(
+  's3',
+  endpoint_url=endpoint_url or s.s3_endpoint,
+  region_name=s.s3_region,
+  aws_access_key_id=s.s3_access_key,
+  aws_secret_access_key=s.s3_secret_key,
+  config=Config(s3={'addressing_style':'path'}),
+ )
 def ensure_bucket()->None:
  s=get_settings()
  if s.storage_backend == 'local':
@@ -31,9 +40,9 @@ def ensure_bucket()->None:
    except Exception as create_error:
     last_error=create_error
     if attempt<5:
-     logger.warning('MinIO not ready (attempt %s/6); retrying',attempt+1)
+     logger.warning('S3-compatible storage not ready (attempt %s/6); retrying',attempt+1)
      time.sleep(min(1.0+attempt,4.0))
- if last_error: raise RuntimeError('Could not reach MinIO or create the document bucket after retries') from last_error
+ if last_error: raise RuntimeError('Could not reach S3-compatible storage or create the document bucket after retries') from last_error
 def put(key:str,data:bytes,content_type:str)->None:
  if get_settings().storage_backend == 'local':
   path=(Path(get_settings().storage_local_path)/key).resolve();root=Path(get_settings().storage_local_path).resolve()
@@ -52,7 +61,11 @@ def presign(key:str,expires:int=300)->str:
   raw=base64.urlsafe_b64encode(key.encode()).decode().rstrip('=');message=f'{raw}:{expiry}'
   secret=get_settings().jwt_secret.encode();signature=hmac.new(secret,message.encode(),hashlib.sha256).hexdigest()
   return f'http://localhost:8000/api/v1/documents/local/{raw}.{expiry}.{signature}'
- return _client().generate_presigned_url('get_object',Params={'Bucket':get_settings().s3_bucket,'Key':key},ExpiresIn=expires)
+ settings=get_settings()
+ # Container-to-container storage uses S3_ENDPOINT (e.g. http://minio:9000),
+ # while signed links must target a host address that the browser can resolve.
+ public_endpoint=getattr(settings,'s3_public_endpoint','') or settings.s3_endpoint
+ return _client(public_endpoint).generate_presigned_url('get_object',Params={'Bucket':settings.s3_bucket,'Key':key},ExpiresIn=expires)
 
 def read_local_token(token:str)->bytes:
  try:

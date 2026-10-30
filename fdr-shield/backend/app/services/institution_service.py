@@ -7,18 +7,20 @@ from app.models.institution import Institution
 from app.models.fdr import FDR
 from app.models.user import User
 from app.core.enums import Role
-from app.core.security import hash_password
 from app.services.audit_service import record
 from app.core.exceptions import NotFound
 from app.schemas.institution import InstitutionCreate
 from app.core.deps import Pagination
 
 
-async def create_institution(session: AsyncSession, data: InstitutionCreate) -> Institution:
-    # Insert institution + default user; audit
-    inst=Institution(**data.model_dump());session.add(inst);await session.flush()
-    session.add(User(email=inst.contact_email,password_hash=hash_password('ChangeMe123!'),role=Role.INSTITUTION.value,institution_id=inst.id,is_active=True))
-    await record(session,None,'institution',inst.id,'created','',{'aicte_id':[None,inst.aicte_id]});return inst
+async def create_institution(session: AsyncSession, data: InstitutionCreate, actor: User) -> Institution:
+    # Create the organization and send a single-use invitation instead of assigning a shared password.
+    from app.schemas.auth import AdminUserCreate
+    from app.services.user_admin_service import create_user
+    inst=Institution(**data.model_dump(), status='active');session.add(inst);await session.flush()
+    await create_user(session, AdminUserCreate(email=inst.contact_email, full_name=inst.head_name,
+        role=Role.INSTITUTION.value, institution_id=inst.id), actor)
+    await record(session,actor.id,'institution',inst.id,'created','',{'aicte_id':[None,inst.aicte_id]});return inst
 
 
 async def search_institutions(session: AsyncSession, q: str | None, state: str | None, page: Pagination) -> list[Institution]:

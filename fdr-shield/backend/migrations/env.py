@@ -4,11 +4,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from alembic import context
 from sqlalchemy import engine_from_config,pool
+from sqlalchemy.engine import make_url
 from app.core.database import Base
 from app.core.config import get_settings
 from app import models
 config=context.config
-config.set_main_option('sqlalchemy.url',get_settings().database_url.replace('+asyncpg',''))
+database_url = make_url(get_settings().database_url)
+if database_url.drivername == 'postgresql+asyncpg':
+ query = dict(database_url.query)
+ if 'ssl' in query:
+  query['sslmode'] = query.pop('ssl')
+ database_url = database_url.set(drivername='postgresql+psycopg2', query=query)
+elif database_url.drivername == 'sqlite+aiosqlite':
+ database_url = database_url.set(drivername='sqlite')
+config.set_main_option('sqlalchemy.url',database_url.render_as_string(hide_password=False).replace('%','%%'))
 target_metadata=Base.metadata
 def run_migrations_offline():
  context.configure(url=config.get_main_option('sqlalchemy.url'),target_metadata=target_metadata,literal_binds=True,compare_type=True)

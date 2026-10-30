@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "AICTE FDR Portal",
+    "slug": "aicte-fdr-mobile",
+    "scheme": "aictefdr",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "root": "src/app"
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "in.aicte.fdrportal",
+      "backgroundColor": "#F3F6FA",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "extra": {
+      "router": {
+        "root": "src/app"
+      },
+      "eas": {
+        "projectId": "7b1e3b94-e5eb-474a-8baa-5f3bea231a26"
+      }
+    }
+  }
+}

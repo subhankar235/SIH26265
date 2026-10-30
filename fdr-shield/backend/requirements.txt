@@ -9,6 +9,8 @@ alembic
 psycopg2-binary
 python-jose[cryptography]
 passlib[bcrypt]
+argon2-cffi
+email-validator
 pyotp
 python-multipart
 celery[redis]==5.4.*
@@ -20,5 +22,7 @@ Pillow
 aiosmtplib           # free SMTP (Mailhog in dev, Gmail SMTP in prod)
 python-telegram-bot  # free alert channel (WhatsApp replacement)
 rapidfuzz            # fuzzy name matching for fraud checks
+scikit-learn>=1.5,<2 # internal review-priority training and inference
+joblib>=1.4,<2       # versioned model artifact serialization
 pytest
 pytest-asyncio

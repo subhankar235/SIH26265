@@ -3,11 +3,22 @@ services:
     image: postgres:16
     environment:
       { POSTGRES_USER: fdr, POSTGRES_PASSWORD: fdr, POSTGRES_DB: fdrshield }
-    ports: ["5432:5432"]
+    # Avoid colliding with a host PostgreSQL service; backend containers use postgres:5432.
+    ports: ["${POSTGRES_HOST_PORT:-5434}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   redis:
     image: redis:7
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   minio:
     image: chainguard/minio:latest
     command: server /data --console-address ":9001"
@@ -32,21 +43,37 @@ services:
     volumes: ["./backend/mock_bank_api/data:/app/data:ro"]
   backend:
     build: ./backend
-    env_file: ./backend/.env.example
-    depends_on: [postgres, redis, minio, mock-bank]
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      mock-bank: { condition: service_started }
     ports: ["8000:8000"]
     volumes: ["./backend:/app"]
     extra_hosts: ["host.docker.internal:host-gateway"]
   worker:
     build: ./backend
     command: celery -A app.workers.celery_app worker -l info
-    env_file: ./backend/.env.example
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     depends_on: [backend]
     extra_hosts: ["host.docker.internal:host-gateway"]
   beat:
     build: ./backend
     command: celery -A app.workers.celery_app beat -l info
-    env_file: ./backend/.env.example
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
     depends_on: [backend]
   frontend:
     build: ./frontend

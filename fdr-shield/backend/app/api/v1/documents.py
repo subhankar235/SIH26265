@@ -1,9 +1,9 @@
 """Extra documents (pledge letter, sanction PDF)."""
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session
-from app.core.deps import get_current_user, require_roles
+from app.core.deps import get_current_user, require_roles, get_client_ip
 from app.services import document_service
 from app.services import fdr_service
 from app.integrations import storage_client
@@ -21,11 +21,17 @@ async def read_local_document(token: str):
 
 
 @router.post("/{fdr_id}")
-async def upload_document(fdr_id: int, doc_type: str, file: UploadFile = File(...), session=Depends(get_session), user=Depends(get_current_user)):
+async def upload_document(fdr_id: int, request: Request, doc_type: str, file: UploadFile = File(...), session=Depends(get_session), user=Depends(get_current_user)):
     # Validate type/size, store to S3, create Document row
     scope=user.institution_id if user.role=='institution' else None
     await fdr_service.get_fdr(session,fdr_id,scope)
-    return await document_service.store_upload(session,fdr_id,doc_type,file,user.id)
+    from app.services.rate_limit_service import enforce_rate_limit
+    await enforce_rate_limit('document-upload',f'{user.id}:{get_client_ip(request)}',20,60)
+    document = await document_service.store_upload(session,fdr_id,doc_type,file,user.id)
+    if doc_type == 'fdr_scan':
+        from app.services.local_execution_service import run_inline_workflow_if_enabled
+        await run_inline_workflow_if_enabled(session, fdr_id, resume_active=True)
+    return document
 
 
 @router.get("/{fdr_id}")
