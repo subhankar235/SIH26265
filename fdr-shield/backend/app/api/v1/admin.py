@@ -1,5 +1,4 @@
 """Admin-only account management and registration approvals."""
-<<<<<<< HEAD
 import csv
 import asyncio
 import json
@@ -8,9 +7,6 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, UploadFile, File, Form
-=======
-from fastapi import APIRouter, Body, Depends, HTTPException, Header
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session
@@ -22,7 +18,6 @@ from app.models.notification import Notification
 from app.models.workflow import NotificationDeliveryAttempt, OutboxEvent
 from app.schemas.auth import AdminUserCreate, AdminUserOut, AdminUserUpdate, RegistrationDecision, RegistrationDecisionRequest
 from app.services import user_admin_service
-<<<<<<< HEAD
 from app.models.ml import MLModelVersion, MLTrainingJob
 from app.models.workflow import WorkflowNodeExecution
 from app.services.audit_service import record
@@ -306,13 +301,6 @@ async def intelligence_capabilities(actor=Depends(ADMIN)):
         {'id': 'scrutiny_assistance', 'status': 'available',
          'message': 'Existing case-age, workflow-state, and deadline rules provide advisory review priority.'},
     ]}
-=======
-
-router = APIRouter()
-ADMIN = require_roles(Role.ADMIN)
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
-
-
 @router.get('/operations/health')
 async def operations_health(session: AsyncSession = Depends(get_session), actor=Depends(ADMIN)):
     from app.services.admin_ops_service import generate_health_report

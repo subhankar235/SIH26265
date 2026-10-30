@@ -16,12 +16,8 @@ class Pagination:
     limit:int=20
 def pagination(page:int=1,size:int=20)->Pagination: return Pagination(max(0,page-1)*min(max(size,1),100),min(max(size,1),100))
 async def get_current_user(request: Request, session:AsyncSession=Depends(get_session))->User:
-<<<<<<< HEAD
     authorization = request.headers.get('authorization', '')
     token = authorization[7:].strip() if authorization.lower().startswith('bearer ') else request.cookies.get('access_token')
-=======
-    token = request.cookies.get('access_token')
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
     if not token:
         raise HTTPException(401, 'Authentication required')
     try: claims=decode_token(token)

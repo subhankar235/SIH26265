@@ -29,9 +29,6 @@ celery_app.conf.beat_schedule={
     'dispatch-transactional-outbox':{'task':'app.workers.tasks_workflow.dispatch_outbox_task','schedule':10.0},
     'recover-expired-workflow-leases':{'task':'app.workers.tasks_workflow.recover_expired_leases','schedule':30.0},
     'capture-operations-ml-snapshot':{'task':'app.workers.tasks_ml.capture_operations_snapshot','schedule':900.0},
-<<<<<<< HEAD
     'reconcile-stale-internal-training-jobs':{'task':'app.workers.tasks_ml.reconcile_stale_training_jobs','schedule':300.0},
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
     'weekly-audit-chain-export':{'task':'app.workers.tasks_audit.export_audit_snapshot','schedule':crontab(day_of_week='sunday',hour=3,minute=30)},
 }

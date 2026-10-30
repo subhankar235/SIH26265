@@ -58,12 +58,9 @@ class Settings(BaseSettings):
     rate_limit_assistant_per_minute: int = 20
     rate_limit_ocr_per_minute: int = 10
     rules_default_tz: str = 'Asia/Kolkata'
-<<<<<<< HEAD
     # Demo-only toggle: reports anomaly detection as available in ML governance.
     # Set ML_ANOMALY_DEMO=true for presentations; leave false (default) in real deployments.
     ml_anomaly_demo: bool = False
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 
     @model_validator(mode='after')
     def validate_production_secrets(self):

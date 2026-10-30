@@ -1,10 +1,7 @@
 """Workflow control-room inspection, progress stream and safe recovery APIs."""
 import asyncio
 import json
-<<<<<<< HEAD
 from datetime import datetime, timezone
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
@@ -115,11 +112,7 @@ async def workflow_control_room_page(
 
 
 @router.get('/recommendations')
-<<<<<<< HEAD
 async def workflow_recommendations(session: AsyncSession=Depends(get_session),user=Depends(OFFICIAL_ADMIN)):
-=======
-async def workflow_recommendations(session: AsyncSession=Depends(get_session),user=Depends(OFFICIAL)):
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
     from app.services.ml_service import official_recommendations
     return await official_recommendations(session)
 
@@ -163,7 +156,6 @@ async def get_workflow(workflow_id: int, session: AsyncSession=Depends(get_sessi
     checkpoints=list((await session.scalars(select(WorkflowCheckpoint).where(
         WorkflowCheckpoint.workflow_instance_id==workflow_id).order_by(WorkflowCheckpoint.id))).all())
     institution_view=user.role=='institution'
-<<<<<<< HEAD
     lease_until=instance.worker_lease_until
     if lease_until and lease_until.tzinfo is None:
         lease_until=lease_until.replace(tzinfo=timezone.utc)
@@ -175,13 +167,6 @@ async def get_workflow(workflow_id: int, session: AsyncSession=Depends(get_sessi
         'lifecycle_state':instance.lifecycle_state,'execution_state':instance.execution_state,
         'authorization_state':instance.authorization_state,'current_node':instance.current_node,
         'next_wake_at':instance.next_wake_at,'worker_busy':worker_busy,
-=======
-    return {'id':instance.id,'fdr_id':instance.fdr_id,'institution_id':instance.institution_id,'is_synthetic':fdr_origin,
-        'workflow_version':instance.workflow_version,'execution_version':instance.execution_version,
-        'lifecycle_state':instance.lifecycle_state,'execution_state':instance.execution_state,
-        'authorization_state':instance.authorization_state,'current_node':instance.current_node,
-        'next_wake_at':instance.next_wake_at,
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
         'nodes':[{'id':node.id,'node_key':node.node_key,'attempt':node.attempt,'status':node.status,
             'input_ref':node.input_ref if not institution_view else None,
             'output_ref':node.output_ref if not institution_view else None,

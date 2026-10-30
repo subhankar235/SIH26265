@@ -69,9 +69,6 @@ class MLOperationsSnapshot(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
     metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
     is_synthetic: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
-<<<<<<< HEAD
-
-
 class MLTrainingJob(Base):
     __tablename__ = 'ml_training_jobs'
     __table_args__ = (Index('ix_ml_training_status_created', 'status', 'created_at'),
@@ -91,5 +88,3 @@ class MLTrainingJob(Base):
     requested_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
