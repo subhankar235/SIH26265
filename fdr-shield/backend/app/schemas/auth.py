@@ -26,7 +26,6 @@ class MfaVerifyRequest(BaseModel):
     code: str = Field(pattern=r'^\d{6}$')
 
 
-<<<<<<< HEAD
 class MobileMfaVerifyRequest(BaseModel):
     code: str = Field(pattern=r'^\d{6}$')
     mfa_token: str = Field(min_length=16, max_length=4096)
@@ -41,8 +40,6 @@ class MobileLogoutRequest(BaseModel):
     refresh_token: str = Field(min_length=32, max_length=512)
 
 
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=12, max_length=128)

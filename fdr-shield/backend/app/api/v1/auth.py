@@ -12,12 +12,8 @@ from app.core.cookies import (COOKIE_ACCESS, COOKIE_CSRF, COOKIE_REFRESH,
     clear_session_cookies, set_csrf_cookie, set_mfa_cookie, set_session_cookies)
 from app.schemas.auth import (LoginRequest, LoginCredentials, MfaVerifyRequest, PasswordChangeRequest,
     InstitutionRegistrationRequest, ForgotPasswordRequest, TokenBody, ResetPasswordRequest,
-<<<<<<< HEAD
     InviteAcceptRequest, OfficialRegistrationRequest, MobileMfaVerifyRequest,
     MobileRefreshRequest, MobileLogoutRequest)
-=======
-    InviteAcceptRequest, OfficialRegistrationRequest)
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 from app.schemas.super_admin_setup import SuperAdminSetupRequest
 from app.services import auth_service
 
@@ -65,7 +61,6 @@ async def _shared_login(body: LoginCredentials, request: Request,
     return {'mfa_required': False, 'user': data['user'],'csrf_token':csrf}
 
 
-<<<<<<< HEAD
 @router.post('/mobile/login')
 async def mobile_login(body: LoginRequest, request: Request,
                        session: AsyncSession = Depends(get_session)):
@@ -128,16 +123,6 @@ async def shared_login(body: LoginRequest, request: Request, response: Response,
     """Authenticate only when the stored role matches the selected portal."""
     return await _shared_login(body, request, response, session, body.portal)
 
-
-=======
-@router.post('/login')
-async def shared_login(body: LoginRequest, request: Request, response: Response,
-                       session: AsyncSession = Depends(get_session)):
-    """Authenticate only when the stored role matches the selected portal."""
-    return await _shared_login(body, request, response, session, body.portal)
-
-
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 @router.post('/login/institution', include_in_schema=False)
 async def institution_login_compat(body: LoginCredentials, request: Request, response: Response,
                                    session: AsyncSession = Depends(get_session)):

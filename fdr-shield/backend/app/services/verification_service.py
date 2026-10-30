@@ -6,10 +6,7 @@ from app.core.deps import Pagination
 from app.core.exceptions import NotFound
 from app.models.discrepancy import Discrepancy
 from app.models.fdr import FDR
-<<<<<<< HEAD
 from app.models.institution import Institution
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 from app.models.workflow import WorkflowInstance, WorkflowNodeExecution
 from app.services.audit_service import record
 from app.core.config import get_settings
@@ -25,10 +22,7 @@ async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | N
         WorkflowInstance.fdr_id == fdr_id
     ).order_by(WorkflowInstance.execution_version.desc()).limit(1))
     processing = None
-<<<<<<< HEAD
     review_assessment = None
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
     if workflow:
         latest_node = await session.scalar(select(WorkflowNodeExecution).where(
             WorkflowNodeExecution.workflow_instance_id == workflow.id
@@ -53,7 +47,6 @@ async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | N
         }
         if get_settings().celery_task_always_eager:
             processing['local_inline_enabled'] = True
-<<<<<<< HEAD
         if include_review_assessment:
             validation_node = await session.scalar(select(WorkflowNodeExecution).where(
                 WorkflowNodeExecution.workflow_instance_id == workflow.id,
@@ -68,10 +61,6 @@ async def get_report(session: AsyncSession, fdr_id: int, institution_id: int | N
     return {'ocr': fdr.ocr_data, 'bank': fdr.bank_data, 'discrepancies': rows,
             'trust_badge': fdr.trust_badge, 'processing': processing,
             'review_assessment': review_assessment}
-=======
-    return {'ocr': fdr.ocr_data, 'bank': fdr.bank_data, 'discrepancies': rows,
-            'trust_badge': fdr.trust_badge, 'processing': processing}
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 
 
 async def resolve_discrepancy(session: AsyncSession, discrepancy_id: int, remarks: str, user_id: int, actor: str) -> Discrepancy:

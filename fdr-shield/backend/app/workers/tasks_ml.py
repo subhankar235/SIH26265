@@ -1,15 +1,10 @@
 """Periodic raw metric capture for the BOCPD Gate 0 series."""
-<<<<<<< HEAD
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from sqlalchemy import select
-=======
-from app.core.config import get_settings
-from app.core.database import SessionLocal
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 from app.services.admin_ops_service import collect_operations_metrics
 from app.services.ml_service import capture_operations_snapshot
 from app.workers.celery_app import celery_app, run_async_task
@@ -20,7 +15,6 @@ def capture_operations_snapshot_task() -> dict:
     return run_async_task(_capture())
 
 
-<<<<<<< HEAD
 @celery_app.task(name='app.workers.tasks_ml.train_review_priority', acks_late=True, track_started=True)
 def train_review_priority_task(dataset_path: str, dataset_reference: str, random_seed: int,
                                requested_by_id: int, job_id: int) -> dict:
@@ -143,8 +137,6 @@ async def _reconcile_stale_training_jobs() -> dict:
     return {'failed_jobs': len(rows), 'deleted_uploads': deleted_files}
 
 
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 async def _capture() -> dict:
     async with SessionLocal() as session:
         metrics=await collect_operations_metrics(session)

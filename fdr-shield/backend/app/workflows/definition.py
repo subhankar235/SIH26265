@@ -20,7 +20,6 @@ NODES = {
 }
 START_NODE = 'extract_document'
 
-<<<<<<< HEAD
 NODE_LABELS = {
     'extract_document':'Extract document fields',
     'validate_fields':'Validate declarations and extracted fields',
@@ -52,9 +51,6 @@ def public_definition() -> dict:
         'outcomes':WORKFLOW_OUTCOMES,
         'edges':WORKFLOW_EDGES,
     }
-
-=======
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 
 def next_node(node_key: str, branch: str | None = None) -> str | None:
     if node_key == 'extract_document': return 'validate_fields'
