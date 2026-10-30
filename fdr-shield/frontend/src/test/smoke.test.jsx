@@ -18,8 +18,6 @@ import InstitutionsList from '../pages/bureau/InstitutionsList';
 import ScrutinySplitView from '../pages/bureau/ScrutinySplitView';
 import ScrutinyQueue from '../pages/bureau/ScrutinyQueue';
 import WorkflowControlRoom from '../pages/bureau/WorkflowControlRoom';
-import WorkflowExecution from '../pages/bureau/WorkflowExecution';
-import { buildExecutionGraph } from '../components/workflow/WorkflowCanvas';
 import CommandCenter from '../pages/bureau/CommandCenter';
 import { InstitutionFdrDetail } from '../pages/institution/InstitutionOperations';
 import AdminAccounts from '../pages/admin/AdminAccounts';
@@ -72,12 +70,11 @@ describe('NidhiTrack UI smoke tests', () => {
   });
 
   it('renders conversational Command Center replies separately from action plans', async () => {
-    client.get.mockResolvedValue({ data: [] });
+    client.get.mockResolvedValueOnce({ data: [] });
     client.post.mockResolvedValueOnce({ data: {
       mode: 'chat',
       reply: 'Hello! I can help with general FDR guidance.',
       interpreter: 'llm-chat',
-      message_id:12,
     } });
     renderWithQueryClient(<MemoryRouter><CommandCenter/></MemoryRouter>);
     fireEvent.change(screen.getByLabelText('Ask a question or describe an FDR task'), { target: { value: 'Hello' } });
@@ -512,54 +509,6 @@ describe('NidhiTrack UI smoke tests', () => {
     renderWithQueryClient(<AdminAlerts />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load FDRs for a test alert');
     expect(screen.getByRole('button', { name: 'Queue test alert' })).toBeDisabled();
-  });
-
-  it('builds canvas status from real node attempts and route outcome',()=>{
-    const definition={nodes:[{key:'extract_document',label:'Extract document'},
-      {key:'validate_fields',label:'Validate fields'},{key:'route_case',label:'Route case'}],
-      outcomes:[{id:'outcome-correction',label:'Correction required',state:'correction_required'},
-        {id:'outcome-review',label:'Official review',state:'ready_for_review'}],
-      edges:[{id:'e1',source:'extract_document',target:'validate_fields'},
-        {id:'e2',source:'validate_fields',target:'route_case'},
-        {id:'e3',source:'route_case',target:'outcome-correction',label:'correction'},
-        {id:'e4',source:'route_case',target:'outcome-review',label:'human review'}]};
-    const graph=buildExecutionGraph(definition,[
-      {id:1,node_key:'extract_document',attempt:1,status:'succeeded'},
-      {id:2,node_key:'validate_fields',attempt:1,status:'succeeded'},
-      {id:3,node_key:'route_case',attempt:1,status:'succeeded',output_ref:{route:'correction'}},
-    ],{execution_state:'waiting_event',current_node:null},'outcome-correction');
-    expect(graph.nodes.find(node=>node.id==='extract_document').data.status).toBe('succeeded');
-    expect(graph.nodes.find(node=>node.id==='outcome-correction').data.status).toBe('reached');
-    expect(graph.nodes.find(node=>node.id==='outcome-review').data.status).toBe('not_selected');
-    expect(graph.edges.find(edge=>edge.id==='e3').style.stroke).toBe('#60a5fa');
-  });
-
-  it('shows actual workflow attempts/errors and disables unsupported publishing and unsafe pause',async()=>{
-    client.get.mockImplementation(url=>{
-      if(url==='/workflows/7')return Promise.resolve({data:{id:7,fdr_id:42,is_synthetic:false,
-        workflow_version:'fdr-case-v1',execution_version:1,lifecycle_state:'validation_failed',
-        execution_state:'blocked',authorization_state:'pending',current_node:'validate_fields',
-        definition:{version:'fdr-case-v1',editable:false,nodes:[
-          {key:'extract_document',label:'Extract document fields',side_effect_class:'pure',max_attempts:3,timeout_seconds:180},
-          {key:'validate_fields',label:'Validate declarations and extracted fields',side_effect_class:'idempotent_effect',max_attempts:3,timeout_seconds:120},
-          {key:'route_case',label:'Route case for correction or official review',side_effect_class:'idempotent_effect',max_attempts:3,timeout_seconds:120}],outcomes:[],edges:[]},
-        nodes:[{id:11,node_key:'validate_fields',attempt:1,status:'failed',error_code:'InputFailure',
-          error_message:'Field validation failed',input_ref:{fdr_id:42},output_ref:null,duration_ms:10,
-          started_at:'2026-01-01T00:00:00Z',finished_at:'2026-01-01T00:00:01Z'}],
-        events:[{id:1,event_type:'NODE_FAILED',received_at:'2026-01-01T00:00:01Z'}],checkpoints:[]}});
-      if(url==='/workflows/executions/11')return Promise.resolve({data:{id:11,diagnostics:{field:'amount'}}});
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-    const Canvas=()=> <div data-testid="workflow-canvas">persisted graph</div>;
-    renderWithQueryClient(<MemoryRouter initialEntries={['/official/workflows/7']}>
-      <Routes><Route path="/official/workflows/:id" element={<WorkflowExecution Canvas={Canvas}/>}/></Routes>
-    </MemoryRouter>);
-    expect(await screen.findByText('Persisted execution timeline')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:/Validate declarations and extracted fields/}));
-    expect(screen.getByText(/Field validation failed/)).toBeInTheDocument();
-    expect(screen.getByRole('button',{name:'Publish'})).toBeDisabled();
-    expect(screen.getByRole('button',{name:'Pause idle workflow'})).toBeDisabled();
-    expect(screen.getByRole('button',{name:'Retry failed node'})).toBeDisabled();
   });
 
   it('clears institution assignment when an institution user becomes staff', async () => {

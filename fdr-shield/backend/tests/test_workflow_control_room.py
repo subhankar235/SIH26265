@@ -5,7 +5,11 @@ from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+<<<<<<< HEAD
 from app.api.v1.workflows import get_workflow, workflow_control_room_page, workflow_control_room_summary
+=======
+from app.api.v1.workflows import workflow_control_room_page, workflow_control_room_summary
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 from app.core.database import Base
 from app.core.enums import FDRStatus, TrustBadge
 from app.models import FDR, Institution
@@ -86,17 +90,23 @@ def test_control_room_uses_cursor_pagination_and_reports_missing_workflows():
                 user=official,
             )
             summary = await workflow_control_room_summary(session=session, user=official)
+<<<<<<< HEAD
             execution_detail=await get_workflow(workflow_id=first_page['items'][0]['id'],
                 session=session,user=official)
+=======
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 
             assert len(first_page['items']) == 1
             assert first_page['has_more'] is True
             assert second_page['items'][0]['id'] < first_page['items'][0]['id']
             assert second_page['has_more'] is False
+<<<<<<< HEAD
             assert execution_detail['definition']['editable'] is False
             assert [node['key'] for node in execution_detail['definition']['nodes']]==[
                 'extract_document','validate_fields','route_case']
             assert execution_detail['worker_busy'] is False
+=======
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
             assert summary == {
                 'total_workflows': 2,
                 'total_fdrs': 3,

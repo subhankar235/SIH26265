@@ -332,6 +332,7 @@ async def _execute_node(claim: dict) -> tuple[dict, str | None]:
             items = await fraud_service.compare_records(fdr.declared_data, extracted, bank)
             await fraud_service.persist_discrepancies(session, fdr.id, items, validation.discrepancies)
             await trust_score_service.apply_badge(session, fdr.id, persist_workflow_event=False)
+<<<<<<< HEAD
             from app.core.intelligence_config import get_intelligence_settings
             from app.services.intelligence_service import assess_fdr, build_features
             intelligence_assessment = {'assessment': 'unavailable',
@@ -344,6 +345,8 @@ async def _execute_node(claim: dict) -> tuple[dict, str | None]:
                     extracted=extracted.model_dump(mode='json'), discrepancies=evidence)
                 result = await assess_fdr(features)
                 intelligence_assessment = {key: result.get(key) for key in ('assessment', 'summary')}
+=======
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
             run_key = f"workflow:{claim['workflow_id']}:node:validate_fields:attempt:{claim['attempt']}"
             session.add(VerificationRun(fdr_id=fdr.id, document_id=doc.id if doc else None,
                 extraction_engine=settings.ocr_engine,
@@ -359,8 +362,12 @@ async def _execute_node(claim: dict) -> tuple[dict, str | None]:
             output = {'bank_found': bool(bank.found), 'verification_source': 'mock' if bank.found else 'none',
                 'validation_result': validation.model_dump(mode='json'),
                 'discrepancy_count': len(items) + len(validation.discrepancies),
+<<<<<<< HEAD
                 'high_discrepancy_count': len(unresolved_high),
                 'review_assessment': intelligence_assessment}
+=======
+                'high_discrepancy_count': len(unresolved_high)}
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
             await session.commit()
             return output, 'correction' if unresolved_high else None
 

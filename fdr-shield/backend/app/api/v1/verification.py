@@ -55,7 +55,11 @@ async def resolve_discrepancy(discrepancy_id: int, remarks: str, session=Depends
 
 
 @router.get("/discrepancies")
+<<<<<<< HEAD
 async def list_discrepancies(resolved: bool = False, real_only: bool = False,
         page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
+=======
+async def list_discrepancies(resolved: bool = False, page: Pagination = Depends(pagination), session=Depends(get_session), user=Depends(require_roles('aicte_official','admin'))):
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
     # Discrepancy Alert Board data
     return await verification_service.list_discrepancies(session,resolved,page,real_only)

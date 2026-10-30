@@ -31,6 +31,7 @@ def portal_login(client, body, endpoint='/api/v1/auth/login'):
     return client.post(endpoint,json=body,headers={'X-CSRF-Token':csrf})
 
 
+<<<<<<< HEAD
 def test_mobile_bearer_session_mfa_refresh_and_logout_share_web_role_security():
     import pyotp
 
@@ -107,6 +108,8 @@ def test_mobile_bearer_session_mfa_refresh_and_logout_share_web_role_security():
     asyncio.run(run())
 
 
+=======
+>>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
 def test_argon2id_password_hash_and_legacy_upgrade_path():
     encoded = hash_password('a-long-unique-password-2026')
     assert encoded.startswith('$argon2id$')
