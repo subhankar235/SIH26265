@@ -26,6 +26,6 @@ def create_app()->FastAPI:
     app.add_middleware(AuditMiddleware); app.add_middleware(CSRFMiddleware); app.middleware('http')(add_request_id)
     app.add_middleware(CORSMiddleware,allow_origins=sorted(origins),allow_credentials=True,allow_methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'],allow_headers=['*'],expose_headers=['X-Request-ID','Authorization'],max_age=86400)
     register_exception_handlers(app); app.include_router(api_router,prefix='/api/v1')
-    app.add_api_route('/health',health,methods=['GET']); app.add_event_handler('startup',on_startup)
+    app.add_api_route('/',health,methods=['GET']); app.add_api_route('/health',health,methods=['GET']); app.add_event_handler('startup',on_startup)
     return app
 app=create_app()
