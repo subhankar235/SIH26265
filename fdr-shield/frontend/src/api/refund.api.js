@@ -1,0 +1,1 @@
+import{client}from'./client';export const createRefund=body=>client.post('/refunds',body).then(r=>r.data);export const listRefunds=params=>client.get('/refunds',{params}).then(r=>r.data);export const decideRefund=(id,body)=>client.post(`/refunds/${id}/decision`,body).then(r=>r.data);

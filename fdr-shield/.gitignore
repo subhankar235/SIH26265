@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+.env
+*.pyc
+dist/
+.venv/
+.env.example
+.env.example
+frontend\.env.example

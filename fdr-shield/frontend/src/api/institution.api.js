@@ -1,0 +1,1 @@
+import{client}from'./client';export const listInstitutions=params=>client.get('/institutions',{params}).then(r=>r.data);export const getInstitution=id=>client.get(`/institutions/${id}`).then(r=>r.data);export const getInstitutionFdrs=id=>client.get(`/institutions/${id}/fdrs`).then(r=>r.data);

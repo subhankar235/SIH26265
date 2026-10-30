@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      { POSTGRES_USER: fdr, POSTGRES_PASSWORD: fdr, POSTGRES_DB: fdrshield }
+    # Avoid colliding with a host PostgreSQL service; backend containers use postgres:5432.
+    ports: ["${POSTGRES_HOST_PORT:-5434}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  minio:
+    image: chainguard/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /minio/health/live HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3; IFS= read -r status <&3; [[ \"$$status\" == *'200 OK'* ]]"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  mailhog:
+    image: mailhog/mailhog
+    ports: ["8025:8025"]
+  mock-bank:
+    build: ./backend/mock_bank_api
+    ports: ["9100:9000"]
+    volumes: ["./backend/mock_bank_api/data:/app/data:ro"]
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      mock-bank: { condition: service_started }
+    ports: ["8000:8000"]
+    volumes: ["./backend:/app"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker:
+    build: ./backend
+    command: celery -A app.workers.celery_app worker -l info
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
+    depends_on: [backend]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  beat:
+    build: ./backend
+    command: celery -A app.workers.celery_app beat -l info
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env
+        required: false
+    depends_on: [backend]
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+    ports: ["5173:5173"]
+    volumes: ["./frontend:/app", "/app/node_modules"]
+volumes:
+  pgdata:
+  minio-data:
