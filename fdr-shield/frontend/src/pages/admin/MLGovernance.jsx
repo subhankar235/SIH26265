@@ -1,10 +1,9 @@
-<<<<<<< HEAD
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, AlertTriangle, ArrowRight, BadgeCheck, Building2, CalendarDays, CircleHelp, FileSearch, GitCompareArrows, ListChecks, ScanSearch, ShieldCheck } from 'lucide-react';
 import { client } from '../../api/client';
-import { EmptyState, ErrorState, LoadingState } from '../../components/common/PageStates';
+import { EmptyState, ErrorState, LoadingState, useToast } from '../../components/common/PageStates';
 
 const capabilityInfo = {
   document_analysis: {
@@ -70,7 +69,7 @@ function FindingTable({ rows }) {
   return <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600"><tr>{['Case reference','Institution','Finding type','Summary','Review status','Detected at','Action'].map(title=><th key={title} className="px-4 py-3 font-semibold">{title}</th>)}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className="border-t border-slate-200 align-top"><td className="px-4 py-3 font-semibold text-slate-900">{row.fdr_number}</td><td className="px-4 py-3">{row.institution_name}</td><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${row.severity==='high'?'bg-red-50 text-red-800':'bg-amber-50 text-amber-900'}`}>{findingType(row.field)}</span><p className="mt-1 text-xs text-slate-500">{row.severity} severity</p></td><td className="max-w-72 px-4 py-3 text-slate-700">Declared: {row.declared_value??'Not recorded'}<br/>Found: {row.extracted_value??'Not recorded'}<p className="mt-1 text-xs text-slate-500">Source: {row.source}</p></td><td className="px-4 py-3"><span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900">{row.resolved?'Reviewed':'Pending review'}</span></td><td className="whitespace-nowrap px-4 py-3 text-slate-600">{row.detected_at ? <span className="inline-flex items-center gap-1"><CalendarDays size={14}/>{new Date(row.detected_at).toLocaleString()}</span> : 'Not recorded'}</td><td className="px-4 py-3"><Link to={`/bureau/scrutiny/${row.fdr_id}`} className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-blue-800 underline underline-offset-2">View case<ArrowRight size={14}/></Link></td></tr>)}</tbody></table></div>;
 }
 
-export default function MLGovernance() {
+function IntelligenceOverview() {
   const queryClient = useQueryClient();
   const [findingsPage, setFindingsPage] = useState(1);
   const capabilities = useQuery({ queryKey: ['ml-showcase-capabilities'], queryFn: () => client.get('/admin/intelligence/capabilities').then(r => r.data.capabilities) });
@@ -95,13 +94,9 @@ export default function MLGovernance() {
 
     <section aria-label="Responsible review principles" className="grid gap-4 md:grid-cols-3"><article className="rounded-xl border border-slate-200 bg-white p-5"><h3 className="flex items-center gap-2 font-bold text-slate-900"><ShieldCheck size={18} className="text-blue-800"/>Evidence-led analysis</h3><p className="mt-2 text-sm leading-6 text-slate-600">Findings link to recorded document values and verification results wherever available.</p></article><article className="rounded-xl border border-slate-200 bg-white p-5"><h3 className="flex items-center gap-2 font-bold text-slate-900"><BadgeCheck size={18} className="text-blue-800"/>Human-supervised decisions</h3><p className="mt-2 text-sm leading-6 text-slate-600">Automated assistance does not independently approve or reject FDRs; authorized officials retain decision-making authority.</p></article><article className="rounded-xl border border-slate-200 bg-white p-5"><h3 className="flex items-center gap-2 font-bold text-slate-900"><AlertTriangle size={18} className="text-amber-700"/>Safe manual review</h3><p className="mt-2 text-sm leading-6 text-slate-600">When automated analysis is unavailable or unreliable, the established scrutiny workflow remains available.</p></article></section>
   </section>;
-=======
-import { useState } from 'react';
-import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
-import { client } from '../../api/client';
-import { EmptyState,ErrorState,LoadingState,useToast } from '../../components/common/PageStates';
+}
 
-export default function MLGovernance(){
+function MLDataGates() {
  const qc=useQueryClient(),toast=useToast(),[sampleCount,setSampleCount]=useState(200);
  const gates=useQuery({queryKey:['ml-gates'],queryFn:()=>client.get('/admin/ml/gates').then(r=>r.data)});
  const registry=useQuery({queryKey:['ml-registry'],queryFn:()=>client.get('/admin/ml/registry').then(r=>r.data)});
@@ -123,5 +118,11 @@ export default function MLGovernance(){
   <section><h2 className="mb-3 text-xl font-bold">Version registry</h2>{!registry.data.length?<EmptyState title="No Gate 0 assessments registered">Run an assessment to record dataset hashes, acceptance criteria, and the active fallback.</EmptyState>:<div className="overflow-x-auto rounded-xl border bg-white"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-slate-50"><tr>{['Use case','Model','Version','Status','Real rows','Synthetic rows','Dataset hash','Origin'].map(x=><th className="p-3" key={x}>{x}</th>)}</tr></thead><tbody>{registry.data.map(r=><tr key={r.id} className="border-t"><td className="p-3">{r.use_case}</td><td className="p-3">{r.model_name}</td><td className="p-3">{r.version}</td><td className="p-3">{r.status}</td><td className="p-3">{r.real_training_rows}</td><td className="p-3">{r.synthetic_training_rows}</td><td className="max-w-56 truncate p-3" title={r.dataset_hash}>{r.dataset_hash}</td><td className="p-3 font-semibold">{r.is_synthetic?'SYNTHETIC — DEMO ONLY':'REAL-DATA GATE / NOT TRAINED'}</td></tr>)}</tbody></table></div>}</section>
   <section className="grid gap-5 xl:grid-cols-2"><div><h2 className="mb-3 text-xl font-bold">Synthetic examples</h2>{!samples.data?.length?<EmptyState title="No demo samples generated">Generate synthetic rows to check the demo UI and pipeline wiring.</EmptyState>:<div className="space-y-2">{samples.data.map(s=><article key={s.id} className="rounded-lg border border-amber-300 bg-amber-50 p-3"><p className="text-xs font-bold text-amber-950">SYNTHETIC · {s.use_case} · feature {s.feature_version}</p><pre className="mt-2 max-h-32 overflow-auto text-xs">{JSON.stringify(s.features,null,2)}</pre></article>)}</div>}</div><div><h2 className="mb-3 text-xl font-bold">Advisory predictions</h2>{!predictions.data?.length?<EmptyState title="No recommendations yet">Run the deterministic fallback to generate recommendations.</EmptyState>:<div className="space-y-2">{predictions.data.map(p=><article key={p.id} className={`rounded-lg border p-3 ${p.is_synthetic?'border-amber-300 bg-amber-50':'bg-white'}`}><p className="text-xs font-semibold">{p.is_synthetic?'SYNTHETIC DEMO':'REAL RECORD · DETERMINISTIC FALLBACK'} · {p.use_case} · {p.entity_type} {p.entity_id??''}</p><p className="mt-1 font-semibold">{p.recommendation}</p><p className="text-xs text-slate-600">Predictor: {p.predictor} · Score: {p.score??'not calculated'}</p></article>)}</div>}</div></section>
  </section>;
->>>>>>> a27ee110f6ba3d79cb2eb0cff239996b7f97ea26
+}
+
+export default function MLGovernance() {
+  return <div className="space-y-8">
+    <IntelligenceOverview />
+    <MLDataGates />
+  </div>;
 }
