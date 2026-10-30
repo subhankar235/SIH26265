@@ -1,0 +1,76 @@
+.workflow-canvas {
+  height: min(68vh, 700px);
+  min-height: 520px;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  background: radial-gradient(ellipse at top, #172033 0%, #0b1120 58%, #080d18 100%);
+}
+
+.workflow-canvas .react-flow__controls,
+.workflow-canvas .react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  fill: #1e293b;
+}
+
+.workflow-canvas .react-flow__controls-button {
+  border-bottom-color: #334155;
+  background: #111827;
+  fill: #e2e8f0;
+}
+
+.workflow-canvas .react-flow__controls-button:hover {
+  background: #1e293b;
+}
+
+.workflow-node {
+  display: flex;
+  width: 260px;
+  min-height: 92px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #475569;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #1e293b, #111827);
+  color: #f8fafc;
+  box-shadow: 0 12px 28px rgba(0,0,0,.28);
+}
+
+.workflow-node--selected {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(59,130,246,.45), 0 0 24px rgba(59,130,246,.28);
+}
+
+.workflow-node--outcome {
+  width: 235px;
+  min-height: 74px;
+  background: linear-gradient(145deg, #182337, #101827);
+}
+
+.workflow-node-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border: 1px solid #3b82f6;
+  border-radius: 10px;
+  background: rgba(37,99,235,.18);
+  color: #93c5fd;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.workflow-node--outcome .workflow-node-icon { border-color: #475569; color: #cbd5e1; background: #1e293b; }
+.workflow-node-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.workflow-node-copy strong { font-size: 13px; line-height: 1.3; }
+.workflow-node-copy span { color: #cbd5e1; font-size: 11px; text-transform: capitalize; }
+.workflow-node-copy small { color: #94a3b8; font-size: 10px; }
+.workflow-node-status--succeeded, .workflow-node-status--reached { color: #6ee7b7 !important; }
+.workflow-node-status--failed { color: #fca5a5 !important; }
+.workflow-node-status--running, .workflow-node-status--queued { color: #93c5fd !important; }
