@@ -4,7 +4,7 @@
 
 ### Intelligent FDR Lifecycle Management for Institutional Compliance
 **From FDR submission to verified closure.**
-![Uploading image.png…]()
+
 
 A role-based portal that digitizes the lifecycle of institutional security deposits and Fixed Deposit Receipts (FDRs) for AICTE: submission, document intelligence, discrepancy detection, official scrutiny, maturity monitoring, and renewal or release.
 
